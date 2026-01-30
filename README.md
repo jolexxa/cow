@@ -7,6 +7,8 @@
 
 Cow is just an humble AI for your computer. 🥺
 
+https://github.com/user-attachments/assets/bc388516-d407-43ab-8496-e1a0ef91897d
+
 Cow allows you to interact with a local language model, free of charge, as much as you could possibly want — all from the comfort of your own home terminal.
 
 Cow can reason[^1][^2] and use tools[^3][^4].
