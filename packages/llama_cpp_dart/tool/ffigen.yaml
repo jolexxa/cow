@@ -1,0 +1,18 @@
+name: LlamaCppBindings
+description: Bindings for llama.cpp.
+output: ../lib/src/bindings/llama_cpp_bindings.dart
+headers:
+  entry-points:
+    - ../third_party/llama.cpp/include/llama.h
+compiler-opts:
+  - -Ithird_party/llama.cpp/include
+  - -Ithird_party/llama.cpp/ggml/include
+silence-enum-warning: true
+preamble: |
+  // ignore_for_file: non_constant_identifier_names
+  // ignore_for_file: camel_case_types
+  // ignore_for_file: public_member_api_docs
+  // ignore_for_file: constant_identifier_names
+  // ignore_for_file: unused_element
+  // ignore_for_file: unused_field
+  // ignore_for_file: unused_import

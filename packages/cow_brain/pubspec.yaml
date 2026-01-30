@@ -1,0 +1,21 @@
+name: cow_brain
+description: A Very Good Project created by Very Good CLI.
+version: 0.1.0+1
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  ffi: ^2.1.4
+  json_annotation: ^4.9.0
+  llama_cpp_dart:
+    path: ../llama_cpp_dart
+
+dev_dependencies:
+  build_runner: ^2.4.12
+  json_serializable: ^6.9.0
+  mocktail: ^1.0.4
+  test: ^1.26.3
+  test_coverage_badge: ^0.3.2
+  very_good_analysis: ^10.0.0

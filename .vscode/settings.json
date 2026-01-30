@@ -1,0 +1,8 @@
+{
+  "files.exclude": {
+    "**/packages/llama_cpp_dart/third_party/llama.cpp": true
+  },
+  "search.exclude": {
+    "**/packages/llama_cpp_dart/third_party/llama.cpp": true
+  }
+}

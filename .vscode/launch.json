@@ -1,0 +1,37 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "cow",
+      "request": "launch",
+      "type": "dart"
+    },
+    {
+      "name": "blocterm",
+      "cwd": "packages/blocterm",
+      "request": "launch",
+      "type": "dart"
+    },
+    {
+      "name": "dumb_brain",
+      "cwd": "packages/dumb_brain",
+      "request": "launch",
+      "type": "dart"
+    },
+    {
+      "name": "cow_brain",
+      "cwd": "packages/cow_brain",
+      "request": "launch",
+      "type": "dart"
+    },
+    {
+      "name": "llama_cpp_dart",
+      "cwd": "packages/llama_cpp_dart",
+      "request": "launch",
+      "type": "dart"
+    }
+  ]
+}
