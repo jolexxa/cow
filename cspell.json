@@ -12,6 +12,7 @@
     "elif",
     "endfor",
     "endtemplate",
+    "FFFD",
     "ffigen",
     "genhtml",
     "ggml",
@@ -41,8 +42,10 @@
     "*.csv",
     "*.cpp",
     "*.h",
+    "*.z",
+    "*.Z",
     "*.c",
-    "packages/llama_cpp_dart/assets/native/macos/arm64/llama-b7818-bin-macos-arm64/LICENSE",
-    "packages/llama_cpp_dart/lib/src/bindings/llama_cpp_bindings.dart"
+    "packages/llama_cpp_dart/**/*.*",
+    "**/coverage/**"
   ]
 }

@@ -20,8 +20,7 @@ dependencies:
   io: ^1.0.4
   logger: ^2.4.0
   meta: ^1.18.0
-  nocterm:
-    path: /Users/joanna/Desktop/nocterm
+  nocterm: ^0.4.4
   path: ^1.9.1
   pub_updater: ^0.5.0
 

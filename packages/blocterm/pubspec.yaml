@@ -8,8 +8,7 @@ environment:
 
 dependencies:
   bloc: ^8.1.4
-  nocterm:
-    path: /Users/joanna/Desktop/nocterm
+  nocterm: ^0.4.4
 
 dev_dependencies:
   mocktail: ^1.0.4
