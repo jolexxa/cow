@@ -17,10 +17,12 @@
     "genhtml",
     "ggml",
     "GGUF",
+    "jolexxa",
     "libc",
     "libggml",
     "libllama",
     "lstrip",
+    "merror",
     "mlock",
     "Mlock",
     "Nocterm",
@@ -32,7 +34,8 @@
     "Technicals",
     "termios",
     "tojson",
-    "USERPROFILE"
+    "USERPROFILE",
+    "xattr"
   ],
   "ignorePaths": [
     "*.svg",
