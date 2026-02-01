@@ -5,22 +5,21 @@ import 'package:cow_brain/src/adapters/llama/llama_bindings.dart';
 import 'package:cow_brain/src/adapters/llama/llama_client.dart';
 
 final class LlamaBackend {
-  LlamaBackend({String? libraryPath}) : _libraryPath = libraryPath;
+  LlamaBackend({required String libraryPath}) : _libraryPath = libraryPath;
 
-  final String? _libraryPath;
+  final String _libraryPath;
   bool _acquired = false;
 
-  void ensureInitialized({String? libraryPath}) {
-    final effectiveLibraryPath = libraryPath ?? _libraryPath;
+  void ensureInitialized() {
     if (_acquired) {
       _LlamaBackendState.instance.validate(
-        libraryPath: effectiveLibraryPath,
+        libraryPath: _libraryPath,
       );
       return;
     }
     _acquired = true;
     _LlamaBackendState.instance.acquire(
-      libraryPath: effectiveLibraryPath,
+      libraryPath: _libraryPath,
     );
   }
 
@@ -42,7 +41,7 @@ final class _LlamaBackendState {
   String? _libraryPath;
   LlamaBindings? _bindings;
 
-  void validate({required String? libraryPath}) {
+  void validate({required String libraryPath}) {
     if (_refCount == 0) {
       return;
     }
@@ -53,7 +52,7 @@ final class _LlamaBackendState {
     }
   }
 
-  void acquire({required String? libraryPath}) {
+  void acquire({required String libraryPath}) {
     if (_refCount > 0) {
       validate(libraryPath: libraryPath);
       _refCount += 1;

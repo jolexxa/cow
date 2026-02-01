@@ -7,14 +7,14 @@
 
 Cow is just an humble AI for your computer. 🥺
 
-https://github.com/user-attachments/assets/bc388516-d407-43ab-8496-e1a0ef91897d
+<https://github.com/user-attachments/assets/bc388516-d407-43ab-8496-e1a0ef91897d>
 
 Cow allows you to interact with a local language model, free of charge, as much as you could possibly want — all from the comfort of your own home terminal.
 
 Cow can reason[^1][^2] and use tools[^3][^4].
 
 > [!NOTE]
-> Cow only supports 🍎 [Apple] Silicon.
+> Cow supports 🍎 [Apple] Silicon and 🐧 Linux x64.
 
 ## 🤠 Wrangling
 
@@ -24,11 +24,23 @@ Cow is currently not provided as a pre-built binary. To run Cow, you will need t
 > Ironically, the easiest way to get started with Dart is to use [FVM] to install Flutter. Without a version manager, you'll end up in a stampede.
 
 ```sh
+# Development setup:
+
 # Cow uses a submodule for llama_cpp, so this clones everything you need.
+# These headers are used for the llama_cpp_dart FFI bindings package
+# included with Cow.
 git clone --recursive https://github.com/jolexxa/cow.git
 
+# Download the required native libraries for llama_cpp based on the
+# host operating system (macOS ARM64 or Linux x64):
+dart ./tool/download_llama_assets.dart
+
+# Get packages recursively for all sub-projects:
+dart pub global activate very_good_cli
 very_good packages get -r
-dart build cli
+
+# To build only:
+# dart build cli
 
 dart run bin/cow.dart
 ```

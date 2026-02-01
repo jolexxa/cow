@@ -5,7 +5,6 @@
 // ignore_for_file: public_member_api_docs
 
 import 'dart:ffi';
-import 'dart:io';
 
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 
@@ -22,6 +21,7 @@ abstract class LlamaBindings {
 
   void llama_backend_init();
   void llama_backend_free();
+  void ggml_backend_load_all_from_path(Pointer<Char> path);
   void llama_numa_init(ggml_numa_strategy numa);
 
   llama_model_params llama_model_default_params();
@@ -130,6 +130,10 @@ final class LlamaBindingsAdapter implements LlamaBindings {
 
   @override
   void llama_backend_free() => _bindings.llama_backend_free();
+
+  @override
+  void ggml_backend_load_all_from_path(Pointer<Char> path) =>
+      _bindings.ggml_backend_load_all_from_path(path);
 
   @override
   void llama_numa_init(ggml_numa_strategy numa) =>
@@ -308,14 +312,9 @@ final class LlamaBindingsAdapter implements LlamaBindings {
 
 final class LlamaBindingsLoader {
   static LlamaBindings open({
-    String? libraryPath,
-    Directory? executableDir,
+    required String libraryPath,
   }) {
-    final resolvedPath = LlamaCpp.resolveLibraryPath(
-      libraryPath: libraryPath,
-      executableDir: executableDir,
-    );
-    final dylib = DynamicLibrary.open(resolvedPath);
+    final dylib = DynamicLibrary.open(libraryPath);
     return LlamaBindingsAdapter(LlamaCppBindings(dylib));
   }
 }

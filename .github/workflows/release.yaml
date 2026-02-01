@@ -1,0 +1,151 @@
+name: Release Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Bump Version
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine next version
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$latest" ]; then
+            latest="v0.0.0"
+          fi
+
+          # Strip the v prefix and split
+          version="${latest#v}"
+          IFS='.' read -r major minor patch <<< "$version"
+
+          case "${{ inputs.bump }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+
+          tag="v${major}.${minor}.${patch}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Bumping ${latest} -> ${tag}"
+
+      - name: Create and push tag
+        run: |
+          git tag "${{ steps.bump.outputs.tag }}"
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    needs: version
+    if: always() && (needs.version.result == 'success' || needs.version.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos_arm64
+            runner: macos-14
+            asset_os: macos
+            asset_arch: arm64
+          - platform: linux_x64
+            runner: ubuntu-latest
+            asset_os: linux
+            asset_arch: x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Fetch llama.cpp tags
+        run: git -C packages/llama_cpp_dart/third_party/llama.cpp fetch --tags
+
+      - name: Setup Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Get packages
+        run: dart pub get
+
+      - name: Download llama.cpp assets
+        run: dart ./tool/download_llama_assets.dart
+
+      - name: Build bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          platform="${{ matrix.platform }}"
+          bundle_dir="build/cli/${platform}/bundle"
+          lib_dir="${bundle_dir}/lib"
+
+          rm -rf "${bundle_dir}"
+          mkdir -p "${lib_dir}"
+
+          dart compile exe bin/cow.dart -o "${bundle_dir}/cow"
+
+          rsync -a \
+            "packages/llama_cpp_dart/assets/native/${{ matrix.asset_os }}/${{ matrix.asset_arch }}/" \
+            "${lib_dir}/" \
+            --exclude ".gitkeep"
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          platform="${{ matrix.platform }}"
+          mkdir -p dist
+          tar -czf "dist/cow-${platform}.tar.gz" -C "build/cli/${platform}/bundle" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cow-${{ matrix.platform }}
+          path: dist/cow-${{ matrix.platform }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [version, build]
+    if: always() && needs.build.result == 'success' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag || github.ref_name }}
+          files: dist/**/cow-*.tar.gz

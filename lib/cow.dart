@@ -1,2 +1,2 @@
-/// Cow — not quite a unicorn, but almost.
+/// Cow — an humble AI in your terminal.
 library;

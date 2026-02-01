@@ -53,11 +53,12 @@ void main() {
       );
       final runtime = LlamaRuntimeOptions(
         modelPath: StringBuffer('/models/qwen.gguf').toString(),
+        libraryPath: '/tmp/libllama.so',
         contextOptions: contextOptions,
       );
 
       expect(runtime.maxOutputTokensDefault, 512);
-      expect(runtime.libraryPath, isNull);
+      expect(runtime.libraryPath, '/tmp/libllama.so');
       expect(runtime.contextOptions.contextSize, 2048);
       expect(runtime.contextOptions.nThreads, 8);
       expect(runtime.modelOptions.useMlock, isNull);

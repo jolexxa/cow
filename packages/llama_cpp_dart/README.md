@@ -33,7 +33,7 @@ cmake --build build --config Release
 ```
 
 Copy the resulting `libllama.0.dylib` (and its dependency dylibs) into
-`packages/llama_cpp_dart/assets/native/macos/arm64/llama-b7818-bin-macos-arm64`.
+`packages/llama_cpp_dart/assets/native/macos/arm64/`.
 
 When you run `dart build cli`, the build hook in this package bundles those
 libraries into the CLI output.
@@ -43,14 +43,8 @@ libraries into the CLI output.
 ```dart
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 
-final llama = LlamaCpp.open();
-final bindings = llama.bindings;
-```
-
-You can override the library location:
-
-```dart
 final llama = LlamaCpp.open(libraryPath: '/absolute/path/to/libllama.dylib');
+final bindings = llama.bindings;
 ```
 
 ---

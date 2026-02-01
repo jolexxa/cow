@@ -174,10 +174,10 @@ class LlamaRuntimeOptions {
   const LlamaRuntimeOptions({
     required this.modelPath,
     required this.contextOptions,
+    required this.libraryPath,
     this.modelOptions = const LlamaModelOptions(),
     this.samplingOptions = const LlamaSamplingOptions(),
     this.maxOutputTokensDefault = 512,
-    this.libraryPath,
   });
   factory LlamaRuntimeOptions.fromJson(Map<String, Object?> json) =>
       _$LlamaRuntimeOptionsFromJson(json);
@@ -186,7 +186,7 @@ class LlamaRuntimeOptions {
   final LlamaContextOptions contextOptions;
   final LlamaSamplingOptions samplingOptions;
   final int maxOutputTokensDefault;
-  final String? libraryPath;
+  final String libraryPath;
   Map<String, Object?> toJson() => _$LlamaRuntimeOptionsToJson(this);
 }
 

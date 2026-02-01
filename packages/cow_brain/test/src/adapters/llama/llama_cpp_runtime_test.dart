@@ -29,7 +29,7 @@ void main() {
               tokens[0] = 1;
               return 1;
             };
-      LlamaClient.openBindings = ({String? libraryPath}) => bindings;
+      LlamaClient.openBindings = ({required String libraryPath}) => bindings;
       addTearDown(() {
         LlamaClient.openBindings = LlamaBindingsLoader.open;
       });
@@ -37,6 +37,7 @@ void main() {
       final runtime = LlamaCppRuntime(
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: 32,
             nBatch: 4,
@@ -60,6 +61,7 @@ void main() {
       final runtime = LlamaCppRuntime(
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: 60,
             nBatch: 4,
@@ -95,6 +97,7 @@ void main() {
       final runtime = LlamaCppRuntime(
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: 10,
             nBatch: 4,
@@ -130,6 +133,7 @@ void main() {
       final runtime = LlamaCppRuntime(
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: 12,
             nBatch: 4,
@@ -164,6 +168,7 @@ void main() {
       final runtime = LlamaCppRuntime(
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: 20,
             nBatch: 4,
@@ -202,6 +207,7 @@ void main() {
       final runtime = LlamaCppRuntime(
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: 50,
             nBatch: 4,
@@ -236,6 +242,7 @@ void main() {
       final runtime = LlamaCppRuntime(
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: 50,
             nBatch: 2,
@@ -271,6 +278,7 @@ void main() {
         final runtime = LlamaCppRuntime(
           options: const LlamaRuntimeOptions(
             modelPath: 'model',
+            libraryPath: '/tmp/libllama.so',
             contextOptions: LlamaContextOptions(
               contextSize: 32,
               nBatch: 4,
@@ -310,6 +318,7 @@ void main() {
       final runtime = LlamaCppRuntime(
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: 32,
             nBatch: 4,
@@ -351,6 +360,7 @@ void main() {
       final runtime = LlamaCppRuntime(
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: 32,
             nBatch: 4,
@@ -403,6 +413,7 @@ void main() {
       final runtime = LlamaCppRuntime(
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: 64,
             nBatch: 4,
@@ -438,6 +449,7 @@ void main() {
       final runtime = LlamaCppRuntime(
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: 16,
             nBatch: 4,

@@ -45,18 +45,7 @@ final class AppModelProfiles {
     ],
   );
 
-  static ModelProfileSpec get defaultProfile => qwen3;
+  static ModelProfileSpec get primaryProfile => qwen3;
 
-  static List<ModelProfileSpec> get defaultProfiles => <ModelProfileSpec>[
-    qwen3,
-    qwen25_3b,
-  ];
-
-  static final ModelRegistry registry = ModelRegistry(
-    <String, ModelProfileSpec>{
-      qwen3.id: qwen3,
-      qwen25.id: qwen25,
-      qwen25_3b.id: qwen25_3b,
-    },
-  );
+  static ModelProfileSpec get lightweightProfile => qwen25_3b;
 }

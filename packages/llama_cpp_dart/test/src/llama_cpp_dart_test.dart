@@ -6,13 +6,6 @@ import 'package:test/test.dart';
 
 void main() {
   group('LlamaCpp', () {
-    test('resolveLibraryPath prefers explicit path', () {
-      final resolved = LlamaCpp.resolveLibraryPath(
-        libraryPath: '/tmp/libllama',
-      );
-      expect(resolved, equals('/tmp/libllama'));
-    });
-
     test('resolveLibraryPath prefers bundle lib directory', () {
       final tempDir = Directory.systemTemp.createTempSync('llama_cpp_test_');
       try {

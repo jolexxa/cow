@@ -7,15 +7,15 @@ import 'package:cow/src/app/app_model_profiles.dart';
 import 'package:cow/src/app/app_theme.dart';
 import 'package:cow/src/features/chat/chat.dart';
 import 'package:cow/src/features/startup/startup.dart';
+import 'package:cow/src/platforms/platform.dart';
 import 'package:io/io.dart';
 import 'package:nocterm/nocterm.dart';
 
-Future<int> runCowApp(List<String> args) async {
+Future<int> runCowApp(List<String> args, OSPlatform platform) async {
   final code = await runZonedGuarded(
     () async {
       final appInfo = await AppInfo.initialize(
-        modelProfile: AppModelProfiles.qwen3,
-        summaryModelProfile: AppModelProfiles.qwen25_3b,
+        platform: platform,
       );
 
       await runApp(
@@ -32,7 +32,7 @@ Future<int> runCowApp(List<String> args) async {
         ..writeln('Unhandled error: $error')
         ..writeln(stack);
 
-      exit(ExitCode.software.code);
+      platform.exit(ExitCode.software.code);
     },
   );
 
@@ -51,11 +51,14 @@ class CowApp extends StatelessComponent {
         child: ChatPageView(),
       );
     }
-    return BlocProvider<StartupBloc>.create(
-      create: (context) => StartupBloc(
-        installProfiles: AppModelProfiles.defaultProfiles,
+      return BlocProvider<StartupBloc>.create(
+        create: (context) => StartupBloc(
+        installProfiles: [
+          AppModelProfiles.primaryProfile,
+          AppModelProfiles.lightweightProfile,
+        ],
         cowPaths: AppInfo.of(context).cowPaths,
-      ),
+        ),
       child: const TuiTheme(
         data: appThemeBarnyard,
         child: AppStartupView(),

@@ -5,3 +5,7 @@
 .packages
 build/
 pubspec.lock
+
+# Downloaded native binaries (use tool/download_llama_assets.dart)
+assets/native/**
+!assets/native/**/.gitkeep

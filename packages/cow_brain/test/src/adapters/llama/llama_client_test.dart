@@ -14,7 +14,7 @@ void main() {
 
     setUp(() {
       bindings = FakeLlamaBindings();
-      LlamaClient.openBindings = ({String? libraryPath}) => bindings;
+      LlamaClient.openBindings = ({required String libraryPath}) => bindings;
     });
 
     tearDown(() {
@@ -198,12 +198,12 @@ void main() {
     });
 
     test('loadModel applies model options and configures logging', () {
-      LlamaClient().loadModel(
+      LlamaClient(libraryPath: '/tmp/libllama.so').loadModel(
         modelPath: 'model',
         modelOptions: const LlamaModelOptions(),
       );
 
-      final client = LlamaClient();
+      final client = LlamaClient(libraryPath: '/tmp/libllama.so');
       final handles = client.loadModel(
         modelPath: 'model',
         modelOptions: LlamaModelOptions(
@@ -234,7 +234,7 @@ void main() {
     test('loadModel throws when model fails to load', () {
       bindings.modelPtr = nullptr;
 
-      final client = LlamaClient();
+      final client = LlamaClient(libraryPath: '/tmp/libllama.so');
       expect(
         () => client.loadModel(
           modelPath: 'missing',
@@ -285,7 +285,7 @@ void main() {
     });
 
     test('freeContext clears context and dispose frees resources', () {
-      final client = LlamaClient();
+      final client = LlamaClient(libraryPath: '/tmp/libllama.so');
       final handles = client.loadModel(
         modelPath: 'model',
         modelOptions: const LlamaModelOptions(),
@@ -360,7 +360,7 @@ void main() {
   });
 }
 
-LlamaClient _client() => LlamaClient();
+LlamaClient _client() => LlamaClient(libraryPath: '/tmp/libllama.so');
 
 LlamaHandles _handles(LlamaClient client) {
   return client.loadModel(
