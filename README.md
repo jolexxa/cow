@@ -18,13 +18,22 @@ Cow can reason[^1][^2] and use tools[^3][^4].
 
 ## 🤠 Wrangling
 
-Cow is currently not provided as a pre-built binary. To run Cow, you will need to have [Dart SDK] installed.
+### Binary Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jolexxa/cow/main/install.sh | bash
+```
+
+This downloads the latest release for your platform and installs it to `~/.local/bin/`.
+
+### Development Setup
+
+To build from source, you will need to have [Dart SDK] installed.
 
 > [!TIP]
 > Ironically, the easiest way to get started with Dart is to use [FVM] to install Flutter. Without a version manager, you'll end up in a stampede.
 
 ```sh
-# Development setup:
 
 # Cow uses a submodule for llama_cpp, so this clones everything you need.
 # These headers are used for the llama_cpp_dart FFI bindings package
