@@ -106,16 +106,14 @@ jobs:
           set -euo pipefail
           platform="${{ matrix.platform }}"
           bundle_dir="build/cli/${platform}/bundle"
-          lib_dir="${bundle_dir}/lib"
 
           rm -rf "${bundle_dir}"
-          mkdir -p "${lib_dir}"
 
-          dart compile exe bin/cow.dart -o "${bundle_dir}/cow"
+          dart build cli -o "build/cli/${platform}" -t bin/cow.dart
 
           rsync -a \
             "packages/llama_cpp_dart/assets/native/${{ matrix.asset_os }}/${{ matrix.asset_arch }}/" \
-            "${lib_dir}/" \
+            "${bundle_dir}/lib/" \
             --exclude ".gitkeep"
 
       - name: Package artifact
