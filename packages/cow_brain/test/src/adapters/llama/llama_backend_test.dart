@@ -9,7 +9,7 @@ void main() {
 
     setUp(() {
       bindings = FakeLlamaBindings();
-      LlamaClient.openBindings = ({String? libraryPath}) => bindings;
+      LlamaClient.openBindings = ({required String libraryPath}) => bindings;
     });
 
     tearDown(() {

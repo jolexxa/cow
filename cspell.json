@@ -28,7 +28,9 @@
     "numa",
     "Qwen",
     "rstrip",
+    "stty",
     "Technicals",
+    "termios",
     "tojson",
     "USERPROFILE"
   ],

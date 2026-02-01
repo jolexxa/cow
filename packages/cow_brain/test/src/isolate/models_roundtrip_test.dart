@@ -103,6 +103,7 @@ void main() {
       final init = InitRequest(
         runtimeOptions: LlamaRuntimeOptions(
           modelPath: StringBuffer('/models/qwen.gguf').toString(),
+          libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
             contextSize: int.parse('2048'),
             nBatch: int.parse('64'),

@@ -6,16 +6,11 @@ import 'package:path/path.dart' as p;
 
 /// Loads the llama.cpp dynamic library and exposes generated bindings.
 class LlamaCpp {
-  /// Open the dynamic library from [libraryPath] or from defaults.
+  /// Open the dynamic library from [libraryPath].
   factory LlamaCpp.open({
-    String? libraryPath,
-    Directory? executableDir,
+    required String libraryPath,
   }) {
-    final resolvedPath = resolveLibraryPath(
-      libraryPath: libraryPath,
-      executableDir: executableDir,
-    );
-    final dylib = DynamicLibrary.open(resolvedPath);
+    final dylib = DynamicLibrary.open(libraryPath);
     return LlamaCpp._(dylib);
   }
   LlamaCpp._(this.dylib) : bindings = LlamaCppBindings(dylib);
@@ -26,20 +21,10 @@ class LlamaCpp {
   /// Generated FFI bindings.
   final LlamaCppBindings bindings;
 
-  /// Resolve the dynamic library path used by [LlamaCpp.open].
+  /// Resolve the default dynamic library path.
   static String resolveLibraryPath({
-    String? libraryPath,
     Directory? executableDir,
   }) {
-    if (libraryPath != null && libraryPath.isNotEmpty) {
-      return libraryPath;
-    }
-
-    final envPath = Platform.environment['LLAMA_CPP_LIB_PATH'];
-    if (envPath != null && envPath.isNotEmpty) {
-      return envPath;
-    }
-
     final baseDir = executableDir ?? File(Platform.resolvedExecutable).parent;
     final bundleLibPath = p.normalize(
       p.join(baseDir.path, '..', 'lib', defaultLibraryFileName()),

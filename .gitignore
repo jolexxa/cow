@@ -17,3 +17,6 @@ coverage/
 .idea
 *.log
 .claude/
+
+# FVM Version Cache
+.fvm/

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:blocterm/blocterm.dart';
+import 'package:cow/src/app/app_info.dart';
 import 'package:cow/src/features/chat/chat.dart';
 import 'package:cow/src/features/startup/startup_bloc/startup_bloc.dart';
 import 'package:cow/src/features/startup/startup_bloc/startup_event.dart';
@@ -58,7 +59,7 @@ class _StartupPageState extends State<StartupPage> {
           bloc.state.status == StartupStatus.checking) {
         bloc.add(const AppStartupCancelled());
       } else {
-        TerminalBinding.instance.requestShutdown();
+        AppInfo.of(context).platform.exit();
       }
       return true;
     }

@@ -141,6 +141,7 @@ void main() {
 
 const _runtimeOptions = LlamaRuntimeOptions(
   modelPath: 'model',
+  libraryPath: '/tmp/libllama.so',
   contextOptions: LlamaContextOptions(
     contextSize: 128,
     nBatch: 1,
@@ -321,6 +322,9 @@ final class _NoopBindings implements LlamaBindings {
 
   @override
   void llama_backend_init() {}
+
+  @override
+  void ggml_backend_load_all_from_path(Pointer<Char> path) {}
 
   @override
   void llama_free(Pointer<llama_context> ctx) {}

@@ -10,6 +10,7 @@ import 'package:cow_brain/src/adapters/llama/llama_handles.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:ffi/ffi.dart';
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
+import 'package:path/path.dart' as p;
 
 abstract class LlamaClientApi {
   LlamaHandles loadModel({
@@ -55,17 +56,22 @@ abstract class LlamaClientApi {
 }
 
 final class LlamaClient implements LlamaClientApi {
-  LlamaClient({this.libraryPath});
+  LlamaClient({required this.libraryPath});
 
-  final String? libraryPath;
+  final String libraryPath;
 
   LlamaBindings? _bindings;
 
-  static LlamaBindings Function({String? libraryPath}) openBindings =
+  static LlamaBindings Function({required String libraryPath}) openBindings =
       LlamaBindingsLoader.open;
 
   LlamaBindings _ensureBindings() {
-    return _bindings ??= openBindings(libraryPath: libraryPath);
+    if (_bindings != null) return _bindings!;
+    _bindings = openBindings(libraryPath: libraryPath);
+    final dirPath = p.dirname(libraryPath).toNativeUtf8().cast<Char>();
+    _bindings!.ggml_backend_load_all_from_path(dirPath);
+    calloc.free(dirPath);
+    return _bindings!;
   }
 
   @override

@@ -106,7 +106,7 @@ LlamaRuntimeOptions _$LlamaRuntimeOptionsFromJson(Map<String, dynamic> json) =>
             ),
       maxOutputTokensDefault:
           (json['maxOutputTokensDefault'] as num?)?.toInt() ?? 512,
-      libraryPath: json['libraryPath'] as String?,
+      libraryPath: json['libraryPath'] as String,
     );
 
 Map<String, dynamic> _$LlamaRuntimeOptionsToJson(

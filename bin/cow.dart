@@ -2,9 +2,12 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:cow/src/app/app.dart';
+import 'package:cow/src/platforms/platform.dart';
 import 'package:ffi/ffi.dart';
 
 Future<void> main(List<String> args) async {
+  final platform = OSPlatform.current();
+
   // We have to redirect native standard error output to a file because
   // native libraries which write to standard error (like llama_cpp) will ruin
   // our beautiful terminal output.
@@ -13,8 +16,11 @@ Future<void> main(List<String> args) async {
   // multiple models at once, we can't share native handles across isolates and
   // it crashes. So the only option is to redirect native stderr via
   // mac/linux system calls.
-  _silenceNativeStderr();
-  final exitCode = await runCowApp(args);
+  final debug = args.contains('--debug');
+  _redirectNativeStderr(platform, debug: debug);
+
+  final appArgs = args.where((a) => a != '--debug').toList();
+  final exitCode = await runCowApp(appArgs, platform);
   await _flushThenExit(exitCode);
 }
 
@@ -31,15 +37,11 @@ Future<void> _flushThenExit(int status) {
   ]).then<void>((_) => exit(status));
 }
 
-void _silenceNativeStderr() {
+void _redirectNativeStderr(OSPlatform platform, {required bool debug}) {
   final libc = _openLibC();
   if (libc == null) {
     return;
   }
-  const oWrOnly = 0x0001;
-  const oCreat = 0x0200;
-  const oAppend = 0x0008;
-  const mode = 0x1A4; // 0644
 
   final open = libc
       .lookupFunction<
@@ -54,8 +56,25 @@ void _silenceNativeStderr() {
     'close',
   );
 
-  final targetPtr = '/dev/null'.toNativeUtf8();
-  final fd = open(targetPtr, oWrOnly | oCreat | oAppend, mode);
+  final String target;
+  final int flags;
+  if (debug) {
+    target = 'cow_native.log';
+    flags =
+        platform.openFlagWriteOnly |
+        platform.openFlagCreate |
+        platform.openFlagTrunc;
+  } else {
+    target = '/dev/null';
+    flags =
+        platform.openFlagWriteOnly |
+        platform.openFlagCreate |
+        platform.openFlagAppend;
+  }
+
+  const mode = 0x1A4; // 0644
+  final targetPtr = target.toNativeUtf8();
+  final fd = open(targetPtr, flags, mode);
   calloc.free(targetPtr);
   if (fd < 0) {
     return;

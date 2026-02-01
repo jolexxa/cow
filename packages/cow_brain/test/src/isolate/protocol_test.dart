@@ -3,6 +3,7 @@ import 'package:test/test.dart';
 
 const _runtimeOptions = LlamaRuntimeOptions(
   modelPath: '/tmp/model.gguf',
+  libraryPath: '/tmp/libllama.so',
   contextOptions: LlamaContextOptions(
     contextSize: 2048,
     nBatch: 64,

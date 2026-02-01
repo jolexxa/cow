@@ -109,6 +109,9 @@ final class FakeLlamaBindings implements LlamaBindings {
   }
 
   @override
+  void ggml_backend_load_all_from_path(Pointer<Char> path) {}
+
+  @override
   void llama_numa_init(ggml_numa_strategy numa) {
     lastNumaInit = numa;
   }

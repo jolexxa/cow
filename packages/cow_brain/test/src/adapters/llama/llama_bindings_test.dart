@@ -20,10 +20,12 @@ void main() {
       adapter.ggml_log_set(nullptr, nullptr);
       adapter.llama_backend_init();
       adapter.llama_backend_free();
+      adapter.ggml_backend_load_all_from_path(Pointer.fromAddress(10));
       adapter.llama_numa_init(ggml_numa_strategy.GGML_NUMA_STRATEGY_DISTRIBUTE);
       expect(fake.logCalls, 2);
       expect(fake.backendInitCalls, 1);
       expect(fake.backendFreeCalls, 1);
+      expect(fake.backendLoadCalls, 1);
       expect(
         fake.lastNuma?.value,
         ggml_numa_strategy.GGML_NUMA_STRATEGY_DISTRIBUTE.value,
@@ -198,6 +200,7 @@ final class FakeCppBindings extends LlamaCppBindings {
   int logCalls = 0;
   int backendInitCalls = 0;
   int backendFreeCalls = 0;
+  int backendLoadCalls = 0;
   int freeCalls = 0;
   int freeModelCalls = 0;
   int tokenizeCalls = 0;
@@ -237,6 +240,11 @@ final class FakeCppBindings extends LlamaCppBindings {
   @override
   void llama_backend_free() {
     backendFreeCalls += 1;
+  }
+
+  @override
+  void ggml_backend_load_all_from_path(Pointer<Char> path) {
+    backendLoadCalls += 1;
   }
 
   @override

@@ -1,0 +1,38 @@
+name: test
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  cow_brain:
+    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/dart_package.yml@v1
+    with:
+      working_directory: packages/cow_brain
+      min_coverage: 100
+      setup: |
+        cd "$GITHUB_WORKSPACE"
+        git submodule update --init --recursive
+        git -C packages/llama_cpp_dart/third_party/llama.cpp fetch --tags
+        dart pub get
+        dart tool/download_llama_assets.dart
+
+  blocterm:
+    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/dart_package.yml@v1
+    with:
+      working_directory: packages/blocterm
+      min_coverage: 100
+
+  cow_model_manager:
+    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/dart_package.yml@v1
+    with:
+      working_directory: packages/cow_model_manager
+      min_coverage: 100

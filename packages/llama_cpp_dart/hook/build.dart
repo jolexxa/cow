@@ -4,19 +4,6 @@ import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:path/path.dart' as p;
 
-const _macosArm64AssetDir =
-    'assets/native/macos/arm64/llama-b7818-bin-macos-arm64';
-
-const _requiredLibraries = [
-  'libllama.0.dylib',
-  'libggml.0.dylib',
-  'libggml-cpu.0.dylib',
-  'libggml-blas.0.dylib',
-  'libggml-metal.0.dylib',
-  'libggml-rpc.0.dylib',
-  'libggml-base.0.dylib',
-];
-
 Future<void> main(List<String> args) async {
   await build(args, (input, output) async {
     if (!input.config.buildCodeAssets) return;
@@ -24,35 +11,47 @@ Future<void> main(List<String> args) async {
     final targetOS = input.config.code.targetOS;
     final targetArch = input.config.code.targetArchitecture;
 
-    if (targetOS != OS.macOS || targetArch != Architecture.arm64) {
+    late final String assetDir;
+    late final bool Function(String) isNativeLib;
+    if (targetOS == OS.macOS && targetArch == Architecture.arm64) {
+      assetDir = 'assets/native/macos/arm64';
+      isNativeLib = (name) => name.endsWith('.dylib');
+    } else if (targetOS == OS.linux && targetArch == Architecture.x64) {
+      assetDir = 'assets/native/linux/x64';
+      isNativeLib = (name) => name.contains('.so');
+    } else {
       throw BuildError(
         message:
-            'llama_cpp_dart only bundles prebuilt macOS arm64 binaries for '
-            'now. Target was $targetOS/$targetArch. Add the appropriate '
-            'binaries under assets/native and update hook/build.dart.',
+            'llama_cpp_dart only bundles prebuilt macOS arm64 and '
+            'Linux x64 binaries for now. Target was $targetOS/$targetArch. '
+            'Add the appropriate binaries under assets/native and update '
+            'hook/build.dart.',
       );
     }
 
     final packageRootDir = Directory.fromUri(input.packageRoot);
-    final sourceDir = Directory(
-      p.join(packageRootDir.path, _macosArm64AssetDir),
-    );
+    final sourceDir = Directory(p.join(packageRootDir.path, assetDir));
     if (!sourceDir.existsSync()) {
       throw BuildError(
-        message:
-            'Missing prebuilt llama.cpp binaries at '
-            '${sourceDir.path}.',
+        message: 'Missing prebuilt llama.cpp binaries at ${sourceDir.path}.',
+      );
+    }
+
+    final libs = sourceDir
+        .listSync()
+        .whereType<File>()
+        .where((f) => isNativeLib(p.basename(f.path)))
+        .toList();
+
+    if (libs.isEmpty) {
+      throw BuildError(
+        message: 'No native libraries found in ${sourceDir.path}.',
       );
     }
 
     final outputDir = Directory.fromUri(input.outputDirectoryShared);
-    for (final libName in _requiredLibraries) {
-      final sourcePath = p.join(sourceDir.path, libName);
-      final sourceFile = File(sourcePath);
-      if (!sourceFile.existsSync()) {
-        throw BuildError(message: 'Missing required dylib: $sourcePath');
-      }
-
+    for (final sourceFile in libs) {
+      final libName = p.basename(sourceFile.path);
       final resolvedSourcePath = sourceFile.resolveSymbolicLinksSync();
       final outputPath = p.join(outputDir.path, libName);
       File(resolvedSourcePath).copySync(outputPath);

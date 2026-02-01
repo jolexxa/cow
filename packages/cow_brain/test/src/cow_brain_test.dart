@@ -41,7 +41,8 @@ void _fakeBrainIsolate(SendPort sendPort) {
 void main() {
   group('CowBrain', () {
     setUp(() {
-      LlamaClient.openBindings = ({String? libraryPath}) => FakeLlamaBindings();
+      LlamaClient.openBindings = ({required String libraryPath}) =>
+          FakeLlamaBindings();
     });
 
     tearDown(() {
@@ -49,12 +50,15 @@ void main() {
     });
 
     test('can be instantiated', () {
-      expect(CowBrain(), isNotNull);
+      expect(CowBrain(libraryPath: '/tmp/libllama.so'), isNotNull);
     });
 
     test('forwards calls to the harness', () async {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
-      final brain = CowBrain(harness: harness);
+      final brain = CowBrain(
+        libraryPath: '/tmp/libllama.so',
+        harness: harness,
+      );
 
       await brain.init(
         runtimeOptions: _runtimeOptions(),
@@ -91,7 +95,8 @@ void main() {
 
   group('CowBrains', () {
     setUp(() {
-      LlamaClient.openBindings = ({String? libraryPath}) => FakeLlamaBindings();
+      LlamaClient.openBindings = ({required String libraryPath}) =>
+          FakeLlamaBindings();
     });
 
     tearDown(() {
@@ -99,7 +104,7 @@ void main() {
     });
 
     test('creates, reuses, removes, and disposes brains', () async {
-      final brains = CowBrains<String>();
+      final brains = CowBrains<String>(libraryPath: '/tmp/libllama.so');
       final harnessA = BrainHarness(entrypoint: _fakeBrainIsolate);
       final harnessB = BrainHarness(entrypoint: _fakeBrainIsolate);
 
@@ -143,6 +148,7 @@ void main() {
 LlamaRuntimeOptions _runtimeOptions() {
   return const LlamaRuntimeOptions(
     modelPath: '/tmp/model.gguf',
+    libraryPath: '/tmp/libllama.so',
     contextOptions: LlamaContextOptions(
       contextSize: 2048,
       nBatch: 64,

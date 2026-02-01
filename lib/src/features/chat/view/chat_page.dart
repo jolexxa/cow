@@ -86,7 +86,7 @@ class _ChatPageState extends State<ChatPage> {
     bool supportsReasoning,
   ) {
     if (event.matches(LogicalKey.keyC, ctrl: true)) {
-      TerminalBinding.instance.requestShutdown();
+      AppInfo.of(context).platform.exit();
       return true;
     }
     if (event.matches(LogicalKey.keyR, ctrl: true) && !state.generating) {

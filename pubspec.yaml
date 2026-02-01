@@ -18,6 +18,8 @@ dependencies:
     path: packages/cow_model_manager
   ffi: ^2.1.0
   io: ^1.0.4
+  llama_cpp_dart:
+    path: packages/llama_cpp_dart
   logger: ^2.4.0
   meta: ^1.18.0
   nocterm: ^0.4.4

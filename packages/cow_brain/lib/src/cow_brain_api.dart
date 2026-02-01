@@ -6,9 +6,9 @@ import 'package:cow_brain/src/isolate/brain_harness.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 
 class CowBrain {
-  CowBrain({BrainHarness? harness})
+  CowBrain({required String libraryPath, BrainHarness? harness})
     : _harness = harness ?? BrainHarness(),
-      _backend = LlamaBackend(),
+      _backend = LlamaBackend(libraryPath: libraryPath),
       _disposeBackend = true;
 
   CowBrain._withBackend({
@@ -30,9 +30,7 @@ class CowBrain {
     required AgentSettings settings,
     required bool enableReasoning,
   }) {
-    _backend.ensureInitialized(
-      libraryPath: runtimeOptions.libraryPath,
-    );
+    _backend.ensureInitialized();
     return _harness.init(
       runtimeOptions: runtimeOptions,
       profile: profile,
@@ -79,7 +77,7 @@ class CowBrain {
 }
 
 final class CowBrains<TKey> {
-  CowBrains({String? libraryPath})
+  CowBrains({required String libraryPath})
     : _backend = LlamaBackend(
         libraryPath: libraryPath,
       );

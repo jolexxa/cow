@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:blocterm/blocterm.dart';
+import 'package:cow/src/app/app_model_profiles.dart';
 import 'package:cow/src/platforms/platform.dart';
 import 'package:cow_brain/cow_brain.dart';
 import 'package:cow_model_manager/cow_model_manager.dart';
@@ -22,10 +23,10 @@ abstract class AppInfo {
   static const int summaryMaxTokens = 512;
 
   static Future<AppInfo> initialize({
-    required ModelProfileSpec modelProfile,
-    required ModelProfileSpec summaryModelProfile,
-    String? libraryPathOverride,
+    required OSPlatform platform,
   }) async {
+    final modelProfile = AppModelProfiles.primaryProfile;
+    final summaryModelProfile = AppModelProfiles.lightweightProfile;
     final cowPaths = CowPaths();
     final toolRegistry = ToolRegistry()
       ..register(
@@ -41,10 +42,7 @@ abstract class AppInfo {
         (_) => DateTime.now().toIso8601String(),
       );
 
-    final platform = OSPlatform.current();
-
-    final libraryPath =
-        libraryPathOverride ?? await platform.resolveLlamaLibraryPath();
+    final libraryPath = platform.resolveLlamaLibraryPath();
     final modelPath = cowPaths.modelEntrypoint(modelProfile);
     final requiredProfilesPresent =
         profileFilesPresent(modelProfile, cowPaths) &&
@@ -70,7 +68,9 @@ abstract class AppInfo {
       ),
     );
 
-    final summaryModelPath = cowPaths.modelEntrypoint(summaryModelProfile);
+    final summaryModelPath = cowPaths.modelEntrypoint(
+      summaryModelProfile,
+    );
     final summaryRuntimeOptions = LlamaRuntimeOptions(
       modelPath: summaryModelPath,
       libraryPath: libraryPath,
