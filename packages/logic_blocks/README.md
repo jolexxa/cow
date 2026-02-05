@@ -6,18 +6,6 @@
 
 Human-friendly hierarchical state machines for Dart.
 
-Don't:
-
-- Create states from inside other states — it'll break the virtual method table.
-
-## Installation 💻
-
-Install via `dart pub add`:
-
-```sh
-dart pub add logic_blocks
-```
-
 ---
 
 [license_badge]: https://img.shields.io/badge/license-MIT-blue.svg
