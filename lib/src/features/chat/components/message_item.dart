@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:cow/src/features/chat/domain/models/chat_message.dart';
+import 'package:cow/src/features/chat/state/models/chat_message.dart';
 import 'package:nocterm/nocterm.dart';
 
 class MessageItem extends StatelessComponent {

@@ -11,6 +11,8 @@ dependencies:
   json_annotation: ^4.9.0
   llama_cpp_dart:
     path: ../llama_cpp_dart
+  logic_blocks:
+    path: ../logic_blocks
   path: ^1.9.0
 
 dev_dependencies:

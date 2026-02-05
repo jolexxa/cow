@@ -101,6 +101,7 @@ void main() {
 
     test('requests roundtrip and default enum handling', () {
       final init = InitRequest(
+        modelPointer: 1,
         runtimeOptions: LlamaRuntimeOptions(
           modelPath: StringBuffer('/models/qwen.gguf').toString(),
           libraryPath: '/tmp/libllama.so',

@@ -28,16 +28,17 @@ abstract interface class LlamaRuntime {
 final class LlamaAdapter implements LlmAdapter {
   LlamaAdapter({
     required LlamaRuntime runtime,
-    required LlamaModelProfile profile,
+    required this.profile,
   }) : _runtime = runtime,
-       _profile = profile,
        tokenCounter = LlamaTokenCounter(
          formatter: profile.formatter,
          tokenCounter: runtime.countTokens,
        );
 
   final LlamaRuntime _runtime;
-  final LlamaModelProfile _profile;
+
+  /// The resolved model profile used by this adapter.
+  final LlamaModelProfile profile;
 
   /// Exposes a formatter-aware token counter for the context manager.
   final TokenCounter tokenCounter;
@@ -50,17 +51,17 @@ final class LlamaAdapter implements LlmAdapter {
     required bool enableReasoning,
     required LlmConfig config,
   }) async* {
-    final prompt = _profile.formatter.format(
+    final prompt = profile.formatter.format(
       messages: messages,
       tools: tools,
       systemApplied: systemApplied,
       enableReasoning: enableReasoning,
     );
-    yield* _profile.streamParser.parse(
+    yield* profile.streamParser.parse(
       _runtime.generate(
         prompt: prompt,
-        stopSequences: _profile.formatter.stopSequences,
-        addBos: _profile.formatter.addBos,
+        stopSequences: profile.formatter.stopSequences,
+        addBos: profile.formatter.addBos,
         requiresReset: config.requiresReset,
         reusePrefixMessageCount: config.reusePrefixMessageCount,
       ),

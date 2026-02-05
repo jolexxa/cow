@@ -1,0 +1,19 @@
+name: logic_blocks
+description: Human-friendly hierarchical state machines for Dart.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  collections:
+    path: ../collections
+  meta: ^1.16.0
+
+dev_dependencies:
+  equatable: ^2.0.5
+  mocktail: ^1.0.4
+  test: ^1.25.8
+  test_coverage_badge: ^0.3.2
+  very_good_analysis: ^10.1.0

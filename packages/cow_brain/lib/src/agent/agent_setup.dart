@@ -3,6 +3,8 @@
 
 import 'package:cow_brain/src/adapters/llama/llama_adapter.dart';
 import 'package:cow_brain/src/adapters/llama/llama_cpp_runtime.dart';
+import 'package:cow_brain/src/adapters/llama/llama_profile_detector.dart';
+import 'package:cow_brain/src/adapters/llama/llama_profiles.dart';
 import 'package:cow_brain/src/adapters/llama/llama_prompt_formatter.dart';
 import 'package:cow_brain/src/agent/agent_loop.dart';
 import 'package:cow_brain/src/context/context.dart';
@@ -27,7 +29,6 @@ createAgentWithLlama({
   required ToolRegistry tools,
   required Conversation conversation,
   required int safetyMarginTokens,
-  required int maxSteps,
 }) {
   final llm = LlamaAdapter(runtime: runtime, profile: profile);
   final toolRegistry = tools;
@@ -44,7 +45,6 @@ createAgentWithLlama({
     contextSize: contextSize,
     maxOutputTokens: maxOutputTokens,
     temperature: temperature,
-    maxSteps: maxSteps,
   );
 
   return (
@@ -64,19 +64,29 @@ createAgentWithLlama({
   ContextManager context,
   LlamaCppRuntime runtime,
 })
-createQwenAgent({
+createAgent({
+  required int modelPointer,
   required LlamaRuntimeOptions runtimeOptions,
   required ToolRegistry tools,
   required Conversation conversation,
-  required LlamaModelProfile profile,
+  required LlamaProfileId profileId,
   required int contextSize,
   required int maxOutputTokens,
   required double temperature,
   required int safetyMarginTokens,
-  required int maxSteps,
-  required LlamaCppRuntime Function(LlamaRuntimeOptions options) runtimeFactory,
+  required LlamaCppRuntime Function({
+    required int modelPointer,
+    required LlamaRuntimeOptions options,
+  })
+  runtimeFactory,
 }) {
-  final runtime = runtimeFactory(runtimeOptions);
+  final runtime = runtimeFactory(
+    modelPointer: modelPointer,
+    options: runtimeOptions,
+  );
+  final profile = profileId == LlamaProfileId.auto
+      ? detectProfileFromRuntime(runtime, fallback: LlamaProfiles.qwen3)
+      : LlamaProfiles.profileFor(profileId);
 
   if (contextSize > runtimeOptions.contextOptions.contextSize) {
     throw ArgumentError.value(
@@ -96,7 +106,6 @@ createQwenAgent({
     temperature: temperature,
     profile: profile,
     safetyMarginTokens: safetyMarginTokens,
-    maxSteps: maxSteps,
   );
 
   return (
@@ -107,4 +116,17 @@ createQwenAgent({
     context: bundle.context,
     runtime: runtime,
   );
+}
+
+/// Detects the appropriate profile from a runtime's chat template.
+///
+/// Returns the detected profile, or [fallback] if the chat template is
+/// unavailable or unrecognized.
+LlamaModelProfile detectProfileFromRuntime(
+  LlamaCppRuntime runtime, {
+  required LlamaModelProfile fallback,
+}) {
+  final template = runtime.chatTemplate;
+  if (template == null) return fallback;
+  return const LlamaProfileDetector().detect(template) ?? fallback;
 }

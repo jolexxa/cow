@@ -221,16 +221,6 @@ void main() {
       expect(formatter.addBos, isTrue);
     });
 
-    test('roleNameForTesting returns role strings', () {
-      expect(Qwen25PromptFormatter.roleNameForTesting(Role.system), 'system');
-      expect(Qwen25PromptFormatter.roleNameForTesting(Role.user), 'user');
-      expect(
-        Qwen25PromptFormatter.roleNameForTesting(Role.assistant),
-        'assistant',
-      );
-      expect(Qwen25PromptFormatter.roleNameForTesting(Role.tool), 'tool');
-    });
-
     test('formats assistant tool calls with content and closes the block', () {
       final output = formatter.format(
         messages: const <Message>[

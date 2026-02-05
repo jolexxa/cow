@@ -23,8 +23,13 @@ void main() {
         runtime: runtime,
         profile: LlamaModelProfile(
           formatter: const Qwen3PromptFormatter(),
-          streamParser: QwenStreamParser(
-            toolCallParser: const Qwen3ToolCallParser(),
+          streamParser: UniversalStreamParser(
+            config: StreamParserConfig(
+              toolCallExtractor: const JsonToolCallExtractor(),
+              tags: StreamTokenizer.defaultTags,
+              supportsReasoning: true,
+              enableFallbackToolParsing: false,
+            ),
           ),
         ),
       );
@@ -65,8 +70,13 @@ void main() {
         runtime: runtime,
         profile: LlamaModelProfile(
           formatter: const Qwen3PromptFormatter(),
-          streamParser: QwenStreamParser(
-            toolCallParser: const Qwen3ToolCallParser(),
+          streamParser: UniversalStreamParser(
+            config: StreamParserConfig(
+              toolCallExtractor: const JsonToolCallExtractor(),
+              tags: StreamTokenizer.defaultTags,
+              supportsReasoning: true,
+              enableFallbackToolParsing: false,
+            ),
           ),
         ),
       );
@@ -86,8 +96,13 @@ void main() {
         runtime: runtime,
         profile: LlamaModelProfile(
           formatter: const Qwen3PromptFormatter(),
-          streamParser: QwenStreamParser(
-            toolCallParser: const Qwen3ToolCallParser(),
+          streamParser: UniversalStreamParser(
+            config: StreamParserConfig(
+              toolCallExtractor: const JsonToolCallExtractor(),
+              tags: StreamTokenizer.defaultTags,
+              supportsReasoning: true,
+              enableFallbackToolParsing: false,
+            ),
           ),
         ),
       );

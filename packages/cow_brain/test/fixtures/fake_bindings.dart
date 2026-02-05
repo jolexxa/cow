@@ -78,6 +78,15 @@ final class FakeLlamaBindings implements LlamaBindings {
 
   (llama_memory_t mem, int seqId, int p0, int p1)? lastMemoryRmArgs;
 
+  Pointer<Char> chatTemplateResult = nullptr;
+  int Function(
+    Pointer<llama_model>,
+    Pointer<Char>,
+    Pointer<Char>,
+    int,
+  )?
+  metaValStrImpl;
+
   llama_memory_t memory = Pointer.fromAddress(101);
   int posMin = 0;
   int posMax = 0;
@@ -314,5 +323,23 @@ final class FakeLlamaBindings implements LlamaBindings {
   ) {
     lastMemoryRmArgs = (mem, seqId, p0, p1);
     return memorySeqRmImpl?.call(mem, seqId, p0, p1) ?? true;
+  }
+
+  @override
+  Pointer<Char> llama_model_chat_template(
+    Pointer<llama_model> model,
+    Pointer<Char> name,
+  ) {
+    return chatTemplateResult;
+  }
+
+  @override
+  int llama_model_meta_val_str(
+    Pointer<llama_model> model,
+    Pointer<Char> key,
+    Pointer<Char> buf,
+    int bufSize,
+  ) {
+    return metaValStrImpl?.call(model, key, buf, bufSize) ?? -1;
   }
 }

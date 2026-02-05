@@ -229,9 +229,8 @@ void main() {
 
       await loop.runTurn(convo).toList();
 
-      loop.enableReasoning = false;
       convo.addUser('Hi again');
-      await loop.runTurn(convo).toList();
+      await loop.runTurn(convo, enableReasoning: false).toList();
 
       expect(context.calls, hasLength(3));
       expect(context.calls[1].systemApplied, isTrue);
@@ -372,11 +371,10 @@ void main() {
       final loop = _buildLoop(
         llm: llm,
         tools: tools,
-        maxSteps: 2,
       );
 
       final convo = Conversation.initial().addUser('Hi');
-      final events = await loop.runTurn(convo).toList();
+      final events = await loop.runTurn(convo, maxSteps: 2).toList();
 
       final finished = events.last as AgentTurnFinished;
       expect(finished.finishReason, FinishReason.maxSteps);
@@ -439,17 +437,21 @@ void main() {
         llm: llm,
         tools: tools,
         context: context,
-        toolExecutor: (calls) async => [
-          const ToolResult(
-            toolCallId: 'call-1',
-            name: 'search',
-            content: 'ok',
-          ),
-        ],
       );
 
       final convo = Conversation.initial().addUser('Hi');
-      final events = await loop.runTurn(convo).toList();
+      final events = await loop
+          .runTurn(
+            convo,
+            toolExecutor: (calls) async => [
+              const ToolResult(
+                toolCallId: 'call-1',
+                name: 'search',
+                content: 'ok',
+              ),
+            ],
+          )
+          .toList();
 
       final telemetry = events.whereType<AgentTelemetryUpdate>().first;
       expect(telemetry.promptTokens, 10);
@@ -478,15 +480,61 @@ void main() {
 
       final loop = _buildLoop(
         llm: llm,
-        shouldCancel: shouldCancel,
       );
 
       final convo = Conversation.initial().addUser('Hi');
-      final events = await loop.runTurn(convo).toList();
+      final events = await loop
+          .runTurn(convo, shouldCancel: shouldCancel)
+          .toList();
 
       final finished = events.last as AgentTurnFinished;
       expect(finished.finishReason, FinishReason.cancelled);
       expect(events.whereType<AgentStepFinished>(), isEmpty);
+    });
+
+    test('cancels before tool execution when shouldCancel is true', () async {
+      final llm = FakeLlmAdapter([
+        const [
+          OutputToolCalls([
+            ToolCall(id: 'call-1', name: 'search', arguments: {'q': 'cow'}),
+          ]),
+          OutputStepFinished(FinishReason.stop),
+        ],
+      ]);
+
+      final tools = ToolRegistry()
+        ..register(
+          const ToolDefinition(
+            name: 'search',
+            description: 'Search',
+            parameters: {},
+          ),
+          (args) => throw StateError('Should not be called'),
+        );
+
+      final loop = _buildLoop(
+        llm: llm,
+        tools: tools,
+      );
+
+      // Checks: (1) start of while loop, (2) after OutputToolCalls processed,
+      // (3) after OutputStepFinished processed, (4) before toolExecutor.
+      // Return true on 4th call to hit line 227 specifically.
+      var cancelChecks = 0;
+      bool shouldCancel() {
+        cancelChecks += 1;
+        return cancelChecks >= 4;
+      }
+
+      final convo = Conversation.initial().addUser('Hi');
+      final events = await loop
+          .runTurn(convo, shouldCancel: shouldCancel)
+          .toList();
+
+      final finished = events.last as AgentTurnFinished;
+      expect(finished.finishReason, FinishReason.cancelled);
+      expect(events.whereType<AgentToolResult>(), isEmpty);
+      expect(events.whereType<AgentToolCalls>(), hasLength(1));
     });
 
     test('drops empty deltas after trimming', () async {
@@ -564,11 +612,8 @@ AgentLoop _buildLoop({
   required LlmAdapter llm,
   ToolRegistry? tools,
   ContextManager? context,
-  ToolExecutor? toolExecutor,
-  bool Function()? shouldCancel,
   int contextSize = 128,
   int maxOutputTokens = 32,
-  int maxSteps = 8,
 }) {
   return AgentLoop(
     llm: llm,
@@ -577,9 +622,6 @@ AgentLoop _buildLoop({
     contextSize: contextSize,
     maxOutputTokens: maxOutputTokens,
     temperature: 0.7,
-    maxSteps: maxSteps,
-    toolExecutor: toolExecutor,
-    shouldCancel: shouldCancel,
   );
 }
 

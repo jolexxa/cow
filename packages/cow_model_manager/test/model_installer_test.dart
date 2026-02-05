@@ -5,6 +5,7 @@ import 'package:clock/clock.dart';
 import 'package:cow_model_manager/cow_model_manager.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 Clock _incrementingClock(DateTime start, Duration step) {
@@ -46,38 +47,32 @@ Stream<List<int>> _streamWithDelays(
   return controller.stream;
 }
 
-ModelProfileSpec _profileFor(
+DownloadableModel _profileFor(
   Uri url, {
   String id = 'profile',
   String fileName = 'model.bin',
 }) {
-  return ModelProfileSpec(
+  return DownloadableModel(
     id: id,
-    supportsReasoning: false,
-    files: [ModelFileSpec(url: url.toString(), fileName: fileName)],
+    files: [DownloadableModelFile(url: url.toString(), fileName: fileName)],
     entrypointFileName: fileName,
   );
 }
 
 void main() {
-  test('constructs with defaults', () {
-    final installer = ModelInstaller();
-    expect(installer.paths, isNotNull);
-  });
-
   test('skips existing files and reports completion', () async {
     final tempDir = await Directory.systemTemp.createTemp('cow-skip-');
     try {
       final fileBytes = [1, 2, 3];
       final profile = _profileFor(Uri.parse('https://example.com/skip'));
-      final paths = CowPaths(homeDir: tempDir.path);
-      Directory(paths.modelDir(profile)).createSync(recursive: true);
+      final modelsDir = p.join(tempDir.path, '.cow', 'models');
+      Directory(p.join(modelsDir, profile.id)).createSync(recursive: true);
       File(
-        paths.modelFilePath(profile, profile.files.single),
+        p.join(modelsDir, profile.id, 'model.bin'),
       ).writeAsBytesSync(fileBytes);
 
       final installer = ModelInstaller(
-        paths: paths,
+        modelsDir: modelsDir,
         clock: Clock.fixed(DateTime(2024)),
       );
       final progress = await installer.ensureInstalled([profile]).toList();
@@ -113,13 +108,12 @@ void main() {
       });
 
       final profile = _profileFor(Uri.parse('https://example.com/model.bin'));
-      final paths = CowPaths(homeDir: tempDir.path);
-      Directory(paths.modelDir(profile)).createSync(recursive: true);
-      final tempPath =
-          '${paths.modelFilePath(profile, profile.files.single)}.part';
+      final modelsDir = p.join(tempDir.path, '.cow', 'models');
+      Directory(p.join(modelsDir, profile.id)).createSync(recursive: true);
+      final tempPath = p.join(modelsDir, profile.id, 'model.bin.part');
       File(tempPath).writeAsBytesSync([0, 0]);
       final installer = ModelInstaller(
-        paths: paths,
+        modelsDir: modelsDir,
         clock: _incrementingClock(
           DateTime(2024),
           const Duration(milliseconds: 5),
@@ -140,7 +134,7 @@ void main() {
         isTrue,
       );
 
-      final target = File(paths.modelFilePath(profile, profile.files.single));
+      final target = File(p.join(modelsDir, profile.id, 'model.bin'));
       expect(target.existsSync(), isTrue);
       expect(target.readAsBytesSync(), payload);
       expect(File('${target.path}.part').existsSync(), isFalse);
@@ -162,9 +156,9 @@ void main() {
         Uri.parse('https://example.com/model.bin'),
         id: 'unknown',
       );
-      final paths = CowPaths(homeDir: tempDir.path);
+      final modelsDir = p.join(tempDir.path, '.cow', 'models');
       final installer = ModelInstaller(
-        paths: paths,
+        modelsDir: modelsDir,
         clock: _incrementingClock(
           DateTime(2024),
           const Duration(milliseconds: 2),
@@ -196,8 +190,8 @@ void main() {
         Uri.parse('https://example.com/bad.bin'),
         id: 'error',
       );
-      final paths = CowPaths(homeDir: tempDir.path);
-      final installer = ModelInstaller(paths: paths, client: client);
+      final modelsDir = p.join(tempDir.path, '.cow', 'models');
+      final installer = ModelInstaller(modelsDir: modelsDir, client: client);
 
       await expectLater(
         installer.ensureInstalled([profile]).drain<void>(),
@@ -224,9 +218,9 @@ void main() {
         Uri.parse('https://example.com/slow.bin'),
         id: 'cancel',
       );
-      final paths = CowPaths(homeDir: tempDir.path);
+      final modelsDir = p.join(tempDir.path, '.cow', 'models');
       final installer = ModelInstaller(
-        paths: paths,
+        modelsDir: modelsDir,
         clock: Clock.fixed(DateTime(2024)),
         client: client,
       );
@@ -237,7 +231,7 @@ void main() {
         ], controller: controller).drain<void>(),
         throwsA(isA<ModelInstallCancelled>()),
       );
-      final targetPath = paths.modelFilePath(profile, profile.files.single);
+      final targetPath = p.join(modelsDir, profile.id, 'model.bin');
       expect(File('$targetPath.part').existsSync(), isFalse);
     } finally {
       tempDir.deleteSync(recursive: true);
@@ -271,9 +265,9 @@ void main() {
         Uri.parse('https://example.com/slow.bin'),
         id: 'cancel-mid',
       );
-      final paths = CowPaths(homeDir: tempDir.path);
+      final modelsDir = p.join(tempDir.path, '.cow', 'models');
       final installer = ModelInstaller(
-        paths: paths,
+        modelsDir: modelsDir,
         clock: Clock.fixed(DateTime(2024)),
         client: client,
       );
@@ -285,7 +279,7 @@ void main() {
         throwsA(isA<ModelInstallCancelled>()),
       );
 
-      final targetPath = paths.modelFilePath(profile, profile.files.single);
+      final targetPath = p.join(modelsDir, profile.id, 'model.bin');
       expect(File('$targetPath.part').existsSync(), isFalse);
     } finally {
       tempDir.deleteSync(recursive: true);
@@ -306,9 +300,9 @@ void main() {
         Uri.parse('https://example.com/error.bin'),
         id: 'stream-error',
       );
-      final paths = CowPaths(homeDir: tempDir.path);
+      final modelsDir = p.join(tempDir.path, '.cow', 'models');
       final installer = ModelInstaller(
-        paths: paths,
+        modelsDir: modelsDir,
         clock: Clock.fixed(DateTime(2024)),
         client: client,
       );
@@ -318,7 +312,7 @@ void main() {
         throwsA(isA<Exception>()),
       );
 
-      final targetPath = paths.modelFilePath(profile, profile.files.single);
+      final targetPath = p.join(modelsDir, profile.id, 'model.bin');
       expect(File('$targetPath.part').existsSync(), isFalse);
     } finally {
       tempDir.deleteSync(recursive: true);

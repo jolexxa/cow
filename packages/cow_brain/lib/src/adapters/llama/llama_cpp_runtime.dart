@@ -6,35 +6,60 @@ import 'dart:convert';
 import 'dart:ffi';
 
 import 'package:cow_brain/src/adapters/llama/llama_adapter.dart';
+import 'package:cow_brain/src/adapters/llama/llama_bindings.dart';
 import 'package:cow_brain/src/adapters/llama/llama_client.dart';
 import 'package:cow_brain/src/adapters/llama/llama_handles.dart';
+import 'package:cow_brain/src/adapters/llama/llama_model_metadata.dart';
 import 'package:cow_brain/src/adapters/llama/llama_stream_chunk.dart';
 import 'package:cow_brain/src/isolate/brain_isolate.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 
 /// Native llama.cpp runtime that powers the [LlamaAdapter].
+///
+/// Requires a preloaded model pointer from a model server isolate.
+/// The runtime creates its own context but never loads models itself.
 final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
+  /// Creates a runtime with a shared model pointer from another isolate.
+  ///
+  /// [modelPointer] is the address of a `llama_model*` loaded by ModelServer.
+  /// [options] provides context/sampling configuration and library path.
   LlamaCppRuntime({
+    required int modelPointer,
     required LlamaRuntimeOptions options,
-    LlamaClientApi? client,
-  }) : _options = options {
-    _client =
-        client ??
-        LlamaClient(
-          libraryPath: options.libraryPath,
-        );
-    _handles = _client.loadModel(
-      modelPath: options.modelPath,
-      modelOptions: options.modelOptions,
+    required LlamaClientApi client,
+    required LlamaBindings bindings,
+  }) : _options = options,
+       _client = client {
+    _handles = LlamaHandles.fromModelPointer(
+      modelPointer: modelPointer,
+      bindings: bindings,
     );
+    _handles.context = _client.createContext(_handles, options.contextOptions);
+    if (_handles.context == nullptr) {
+      throw StateError('Failed to create llama context');
+    }
   }
 
+  static const _yieldBoundarySteps = 16;
+
   final LlamaRuntimeOptions _options;
-  late final LlamaClientApi _client;
+  final LlamaClientApi _client;
   late final LlamaHandles _handles;
 
   bool _disposed = false;
   bool _bosApplied = false;
+
+  /// Reads the chat template from the loaded model's GGUF metadata.
+  ///
+  /// Returns null if no chat template is available.
+  String? get chatTemplate {
+    _ensureNotDisposed();
+    final metadata = LlamaModelMetadata(
+      bindings: _handles.bindings,
+      model: _handles.model,
+    );
+    return metadata.chatTemplate;
+  }
 
   @override
   int countTokens(String prompt, {required bool addBos}) {
@@ -56,7 +81,6 @@ final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
     required int reusePrefixMessageCount,
   }) async* {
     _ensureNotDisposed();
-    _ensureContext();
 
     if (requiresReset) {
       _client.resetContext(_handles, _options.contextOptions);
@@ -162,7 +186,7 @@ final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
         }
 
         stepsSinceYield += 1;
-        if (stepsSinceYield >= 16) {
+        if (stepsSinceYield >= _yieldBoundarySteps) {
           stepsSinceYield = 0;
           if (tokenCountDelta > 0) {
             yield LlamaStreamChunk(
@@ -206,7 +230,9 @@ final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
     if (_disposed) {
       return;
     }
-    _client.dispose(_handles);
+    // Only free the context, not the shared model.
+    // The model is owned by ModelServer and freed there.
+    _handles.bindings.llama_free(_handles.context);
     _disposed = true;
   }
 
@@ -220,16 +246,6 @@ final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
   void _ensureNotDisposed() {
     if (_disposed) {
       throw StateError('LlamaCppRuntime is already disposed');
-    }
-  }
-
-  void _ensureContext() {
-    if (_handles.context != nullptr) {
-      return;
-    }
-    _handles.context = _client.createContext(_handles, _options.contextOptions);
-    if (_handles.context == nullptr) {
-      throw StateError('Failed to create llama context');
     }
   }
 

@@ -5,11 +5,16 @@ import 'package:test/test.dart';
 
 void main() {
   group('Qwen3StreamParser', () {
-    late QwenStreamParser parser;
+    late UniversalStreamParser parser;
 
     setUp(() {
-      parser = QwenStreamParser(
-        toolCallParser: const Qwen3ToolCallParser(),
+      parser = UniversalStreamParser(
+        config: StreamParserConfig(
+          toolCallExtractor: const JsonToolCallExtractor(),
+          tags: StreamTokenizer.defaultTags,
+          supportsReasoning: true,
+          enableFallbackToolParsing: false,
+        ),
       );
     });
 
@@ -71,7 +76,7 @@ void main() {
       final outputs = await parser.parse(chunks).toList();
 
       final textOutputs = outputs.whereType<OutputTextDelta>().toList();
-      final combinedText = textOutputs.map((o) => o.text).join();
+      final combinedText = textOutputs.map((output) => output.text).join();
       expect(combinedText, 'Hello world!');
       expect(outputs.last, isA<OutputStepFinished>());
     });
@@ -95,7 +100,7 @@ void main() {
       expect(reasoningOutputs[1].text, 'Second thought.');
 
       final textOutputs = outputs.whereType<OutputTextDelta>().toList();
-      expect(textOutputs.map((o) => o.text).join(), 'Middle text');
+      expect(textOutputs.map((output) => output.text).join(), 'Middle text');
     });
 
     test('stops after tool calls', () async {
@@ -122,7 +127,7 @@ void main() {
 
       // No text output after tool call.
       final textAfterTool = outputs
-          .skipWhile((o) => o is! OutputToolCalls)
+          .skipWhile((output) => output is! OutputToolCalls)
           .whereType<OutputTextDelta>();
       expect(textAfterTool, isEmpty);
     });
@@ -144,7 +149,7 @@ void main() {
       final outputs = await parser.parse(chunks).toList();
 
       final textOutputs = outputs.whereType<OutputTextDelta>().toList();
-      expect(textOutputs.map((o) => o.text).join(), 'Done.');
+      expect(textOutputs.map((output) => output.text).join(), 'Done.');
       expect(outputs.last, isA<OutputStepFinished>());
     });
 

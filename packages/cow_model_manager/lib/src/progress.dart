@@ -1,4 +1,4 @@
-import 'package:cow_model_manager/src/model_specs.dart';
+import 'package:cow_model_manager/src/downloadable_model.dart';
 
 class ModelInstallController {
   bool _cancelled = false;
@@ -30,8 +30,8 @@ class ModelInstallProgress {
     required this.fileSkipped,
   });
 
-  final ModelProfileSpec profile;
-  final ModelFileSpec file;
+  final DownloadableModel profile;
+  final DownloadableModelFile file;
   final int fileReceivedBytes;
   final int? fileTotalBytes;
   final int totalReceivedBytes;

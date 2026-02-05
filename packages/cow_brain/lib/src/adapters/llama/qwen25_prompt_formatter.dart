@@ -100,14 +100,14 @@ final class Qwen25PromptFormatter implements LlamaPromptFormatter {
           (message.role == Role.system && i != 0) ||
           (message.role == Role.assistant && message.toolCalls.isEmpty)) {
         buffer
-          ..writeln('<|im_start|>${_roleName(message.role)}')
+          ..writeln('<|im_start|>${message.role.roleName}')
           ..writeln(message.content.trimRight())
           ..writeln('<|im_end|>');
         continue;
       }
 
       if (message.role == Role.assistant) {
-        buffer.writeln('<|im_start|>${_roleName(message.role)}');
+        buffer.writeln('<|im_start|>${message.role.roleName}');
         final content = message.content.trimRight();
         if (content.isNotEmpty) {
           buffer.writeln(content);
@@ -172,15 +172,4 @@ final class Qwen25PromptFormatter implements LlamaPromptFormatter {
     }
     return null;
   }
-
-  static String _roleName(Role role) {
-    return switch (role) {
-      Role.system => 'system',
-      Role.user => 'user',
-      Role.assistant => 'assistant',
-      Role.tool => 'tool',
-    };
-  }
-
-  static String roleNameForTesting(Role role) => _roleName(role);
 }

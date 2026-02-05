@@ -3,11 +3,10 @@ import 'package:test/test.dart';
 
 void main() {
   test('returns profiles by id and throws for unknown', () {
-    final alpha = ModelProfileSpec(
+    final alpha = DownloadableModel(
       id: 'alpha',
-      supportsReasoning: false,
       files: const [
-        ModelFileSpec(url: 'https://example.com/a', fileName: 'a.bin'),
+        DownloadableModelFile(url: 'https://example.com/a', fileName: 'a.bin'),
       ],
       entrypointFileName: 'a.bin',
     );

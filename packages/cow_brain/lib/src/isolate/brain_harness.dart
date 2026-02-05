@@ -26,6 +26,7 @@ final class BrainHarness {
   Stream<AgentEvent> get events => _events.stream;
 
   Future<void> init({
+    required int modelPointer,
     required LlamaRuntimeOptions runtimeOptions,
     required LlamaProfileId profile,
     required List<ToolDefinition> tools,
@@ -46,6 +47,7 @@ final class BrainHarness {
       BrainRequest(
         type: BrainRequestType.init,
         init: InitRequest(
+          modelPointer: modelPointer,
           runtimeOptions: runtimeOptions,
           profile: profile,
           tools: tools,

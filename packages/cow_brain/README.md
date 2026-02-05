@@ -10,16 +10,19 @@ Cow Brain provides high-level agentic functionality for the Cow terminal AI appl
   │                                                                 │
   │  CowBrain / CowBrains<TKey>                                     │
   │  ┌───────────────────────────────────────────────────────────┐  │
-  │  │ init()  runTurn()  sendToolResult()  cancel()  dispose()  │  │
+  │  │ init() runTurn() sendToolResult() cancel() reset()        │  │
+  │  │ dispose()                                                 │  │
   │  └──────────────────────────┬────────────────────────────────┘  │
   │                             │ (delegates everything)            │
-  │  BrainHarness               │                                   │
-  │  ┌──────────────────────────┴────────────────────────────────┐  │
-  │  │ • Spawns isolate                                          │  │
-  │  │ • Serializes BrainRequest → JSON → SendPort               │  │
-  │  │ • Deserializes JSON → AgentEvent stream back to caller    │  │
-  │  │ • Filters events by turnId                                │  │
-  │  └──────────────────────────┬────────────────────────────────┘  │
+  │  BrainHarness               │         LlamaBackend              │
+  │  ┌──────────────────────────┴──────┐  ┌──────────────────────┐  │
+  │  │ • Spawns isolate                │  │ • Ref-counted native │  │
+  │  │ • Serializes BrainRequest →     │  │   backend init/free  │  │
+  │  │   JSON → SendPort               │  │ • Shared across all  │  │
+  │  │ • Deserializes JSON →           │  │   CowBrains instances│  │
+  │  │   AgentEvent stream             │  └──────────────────────┘  │
+  │  │ • Filters events by turnId      │                            │
+  │  └──────────────────────────┬──────┘                            │
   └─────────────────────────────┼───────────────────────────────────┘
                                 │
               ══════════════════╪════════════════════════
@@ -42,13 +45,13 @@ Cow Brain provides high-level agentic functionality for the Cow terminal AI appl
   │       │             │              │            │               │
   │       ▼             ▼              ▼            ▼               │
   │  ┌─────────┐  ┌────────────┐  ┌──────────┐  ┌──────────────┐    │
-  │  │ Agent   │  │Conversation│  │Context   │  │ Tool         │    │
-  │  │ Loop    │  │            │  │Manager   │  │ Registry     │    │
-  │  │         │  │            │  │          │  │              │    │
-  │  │ steps   │  │ messages   │  │ sliding  │  │ definitions  │    │
-  │  │ through │◄─┤ with       │◄─┤ window   │  │ + execute()  │    │
-  │  │ max N   │  │ validation │  │ + prefix │  │ (stubs—real  │    │
-  │  │ turns   │  │            │  │ reuse    │  │  exec is on  │    │
+  │  │AgentLoop│  │Conversation│  │Context   │  │ Tool         │    │
+  │  │(impl of │  │            │  │Manager   │  │ Registry     │    │
+  │  │ Agent   │  │            │  │          │  │              │    │
+  │  │ Runner) │  │ messages   │  │ sliding  │  │ definitions  │    │
+  │  │ steps   │◄─┤ with       │◄─┤ window   │  │ + execute()  │    │
+  │  │ through │  │ validation │  │ + prefix │  │ (stubs—real  │    │
+  │  │ max N   │  │            │  │ reuse    │  │  exec is on  │    │
   │  └────┬────┘  └────────────┘  └──────────┘  │  main thread)│    │
   │       │                                     └──────────────┘    │
   │       │ calls .next() for each step                             │
@@ -60,8 +63,8 @@ Cow Brain provides high-level agentic functionality for the Cow terminal AI appl
   │  │ ┌─────────────────────────────────────────────────────┐  │   │
   │  │ │ • Formats prompt via LlamaModelProfile              │  │   │
   │  │ │ • Feeds tokens to runtime                           │  │   │
-  │  │ │ • Parses streaming output via StreamParser          │  │   │
-  │  │ │ • Yields ModelOutput events back to AgentLoop       |  │   │
+  │  │ │ • Parses streaming output via UniversalStreamParser │  │   │
+  │  │ │ • Yields ModelOutput events back to AgentLoop       │  │   │
   │  │ └──────────────────────┬──────────────────────────────┘  │   │
   │  └────────────────────────┼─────────────────────────────────┘   │
   │                           │                                     │
@@ -77,7 +80,7 @@ Cow Brain provides high-level agentic functionality for the Cow terminal AI appl
   │                        │                                        │
   │                        ▼                                        │
   │  ┌───────────────────────────────────────────────────────────┐  │
-  │  │ LlamaClient (FFI bridge)                                  │  │
+  │  │ LlamaClient (FFI bridge) + LlamaSamplerChain              │  │
   │  │                                                           │  │
   │  │ dart:ffi → llama.cpp native library                       │  │
   │  └───────────────────────────────────────────────────────────┘  │
@@ -88,18 +91,23 @@ Cow Brain provides high-level agentic functionality for the Cow terminal AI appl
   ══════════════════════════════════════════════
 
     LlamaModelProfile
-    ├── formatter: LlamaPromptFormatter  (turns messages → token sequences)
-    ├── parser:    LlamaStreamParser     (turns raw tokens → ModelOutput)
-    └── toolParser: LlamaToolCallParser  (extracts tool calls from text)
+    ├── formatter:    LlamaPromptFormatter    (turns messages → prompt string)
+    └── streamParser: LlamaStreamParser       (turns raw tokens → ModelOutput)
+                      └── UniversalStreamParser
+                          ├── StreamTokenizer        (tag-aware tokenizer)
+                          └── ToolCallExtractor      (extracts tool calls)
+                              └── JsonToolCallExtractor
 
     Profiles registered:
-    ┌─────────┬────────────────────────┬─────────────────────┐
-    │ ID      │ Formatter              │ Parser              │
-    ├─────────┼────────────────────────┼─────────────────────┤
-    │ qwen3   │ Qwen3PromptFormatter   │ QwenStreamParser    │
-    │ qwen25  │ Qwen25PromptFormatter  │ QwenStreamParser    │
-    │qwen25_3b│ Qwen25PromptFormatter  │ QwenStreamParser    │
-    └─────────┴────────────────────────┴─────────────────────┘
+    ┌────────┬────────────────────────┬───────────────────────┐
+    │ ID     │ Formatter              │ Stream Parser         │
+    ├────────┼────────────────────────┼───────────────────────┤
+    │ qwen3  │ Qwen3PromptFormatter   │ UniversalStreamParser │
+    │ qwen25 │ Qwen25PromptFormatter  │ UniversalStreamParser │
+    └────────┴────────────────────────┴───────────────────────┘
+
+    Auto-detection: LlamaProfileDetector inspects the model's chat
+    template metadata to select the correct profile at init time.
 
 
   AGENT LOOP (one turn)

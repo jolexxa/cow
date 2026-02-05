@@ -1,0 +1,205 @@
+import 'dart:async';
+
+import 'package:cow/src/app/app_model_profile.dart';
+import 'package:cow/src/app/logic_bloc.dart';
+import 'package:cow/src/features/chat/state/chat_data.dart';
+import 'package:cow/src/features/chat/state/chat_input.dart';
+import 'package:cow/src/features/chat/state/chat_logic.dart';
+import 'package:cow/src/features/chat/state/chat_output.dart';
+import 'package:cow/src/features/chat/state/models/chat_message.dart';
+import 'package:cow/src/features/chat/state/summary/summary_brain.dart';
+import 'package:cow/src/features/chat/state/summary/summary_input.dart';
+import 'package:cow/src/features/chat/state/summary/summary_logic.dart';
+import 'package:cow/src/features/chat/state/summary/summary_output.dart';
+import 'package:cow/src/features/chat/state/tool_executor.dart';
+import 'package:cow_brain/cow_brain.dart';
+import 'package:logic_blocks/logic_blocks.dart';
+
+class ChatCubit extends LogicBloc<ChatState> {
+  ChatCubit({
+    required ChatLogic logic,
+    required this.toolRegistry,
+    required this.llamaRuntimeOptions,
+    required this.modelProfile,
+    required this.summaryRuntimeOptions,
+    required this.summaryModelProfile,
+    required CowBrains<String> brains,
+    required CowBrain primaryBrain,
+    required SummaryBrain summaryBrain,
+    required SummaryLogic summaryLogic,
+    required ToolExecutor toolExecutor,
+  }) : _brains = brains,
+       _primaryBrain = primaryBrain,
+       _summaryBrain = summaryBrain,
+       _summaryLogic = summaryLogic,
+       _toolExecutor = toolExecutor,
+       super(logic) {
+    binding
+      ..onOutput<StateUpdated>((_) => emit(state))
+      ..onOutput<LoadModelsRequested>(
+        (output) => unawaited(_loadModels(output.enableReasoning)),
+      )
+      ..onOutput<StartTurnRequested>(
+        (output) =>
+            unawaited(_startTurn(output.userMessage, output.enableReasoning)),
+      )
+      ..onOutput<ExecuteToolCallsRequested>(
+        (output) => unawaited(_executeToolCalls(output.turnId, output.event)),
+      )
+      ..onOutput<CancelSummaryRequested>(
+        (_) => _summaryLogic.input(const CancelSummary()),
+      )
+      ..onOutput<ResetSummaryRequested>(
+        (_) => _summaryLogic.input(const ResetSummary()),
+      )
+      ..onOutput<StartSummaryTurnRequested>(
+        (output) => _summaryLogic.input(StartTurn(output.responseId)),
+      )
+      ..onOutput<SummarizeUserMessageRequested>((output) {
+        _summaryLogic.input(
+          SummarizeUserMessage(
+            output.text,
+            enableReasoning: output.enableReasoning,
+          ),
+        );
+      })
+      ..onOutput<ReasoningSummaryRequested>((output) {
+        _summaryLogic.input(ReasoningDelta(output.text));
+      })
+      ..onOutput<FreezeSummaryRequested>((output) {
+        _summaryLogic.input(const Freeze());
+      });
+
+    _summaryBinding = _summaryLogic.bind()
+      ..onOutput<RunSummaryRequested>(
+        (output) => unawaited(_runSummary(output)),
+      )
+      ..onOutput<SummaryChanged>((_) => emit(state));
+
+    _summaryLogic.start();
+  }
+
+  static const String primaryBrainKey = 'primary';
+  static const String lightweightBrainKey = 'lightweight';
+
+  final ToolRegistry toolRegistry;
+  final LlamaRuntimeOptions llamaRuntimeOptions;
+  final AppModelProfile modelProfile;
+  final LlamaRuntimeOptions summaryRuntimeOptions;
+  final AppModelProfile summaryModelProfile;
+
+  final CowBrains<String> _brains;
+  final CowBrain _primaryBrain;
+  final SummaryBrain _summaryBrain;
+  final SummaryLogic _summaryLogic;
+  final ToolExecutor _toolExecutor;
+
+  late final LogicBlockBinding<SummaryState> _summaryBinding;
+
+  var _responseCounter = 0;
+
+  void toggleReasoning() => input(const ToggleReasoning());
+
+  void initialize({List<ChatMessage> existingMessages = const []}) {
+    input(Start(existingMessages: existingMessages));
+  }
+
+  void submit(String message) {
+    input(Submit(message.trim(), responseId: _nextResponseId()));
+  }
+
+  void cancel() => input(const Cancel());
+
+  void clear() => input(const Clear());
+
+  void reset() => input(const Reset());
+
+  @override
+  Future<void> close() async {
+    if (isClosed) return;
+
+    input(const Dispose());
+    _summaryLogic.input(const CancelSummary());
+    _summaryBinding.dispose();
+    _summaryLogic.stop();
+    await _brains.remove(primaryBrainKey);
+    await _brains.remove(lightweightBrainKey);
+    return super.close();
+  }
+
+  Future<void> _loadModels(bool enableReasoning) async {
+    try {
+      // Load both models in parallel via ModelServer.
+      final results = await Future.wait([
+        _brains.loadModel(modelPath: llamaRuntimeOptions.modelPath),
+        _brains.loadModel(modelPath: summaryRuntimeOptions.modelPath),
+      ]);
+      final primaryModel = results[0];
+      final summaryModel = results[1];
+
+      const agentSettings = AgentSettings(
+        safetyMarginTokens: 64,
+        maxSteps: 8,
+      );
+
+      await _primaryBrain.init(
+        modelPointer: primaryModel.modelPointer,
+        runtimeOptions: llamaRuntimeOptions,
+        profile: modelProfile.modelFamily,
+        tools: toolRegistry.definitions,
+        settings: agentSettings,
+        enableReasoning: enableReasoning,
+      );
+
+      await _summaryBrain.init(
+        modelPointer: summaryModel.modelPointer,
+        runtimeOptions: summaryRuntimeOptions,
+        profile: summaryModelProfile.modelFamily,
+      );
+
+      input(const ModelsLoaded(settings: agentSettings));
+    } on Object catch (e) {
+      input(ModelsLoadFailed(e.toString()));
+    }
+  }
+
+  Future<void> _startTurn(String userMessage, bool enableReasoning) async {
+    try {
+      await for (final event in _primaryBrain.runTurn(
+        userMessage: Message(role: Role.user, content: userMessage),
+        settings: get<ChatData>().agentSettings,
+        enableReasoning: enableReasoning,
+      )) {
+        input(AgentEventReceived(event));
+      }
+
+      input(const TurnFinalized());
+    } on Object catch (e) {
+      input(TurnError(e.toString()));
+    }
+  }
+
+  Future<void> _executeToolCalls(String turnId, AgentToolCalls event) async {
+    try {
+      await _toolExecutor.execute(turnId: turnId, calls: event.calls);
+    } finally {
+      input(const ToolCallsComplete());
+    }
+  }
+
+  int _nextResponseId() => _responseCounter++;
+
+  Future<void> _runSummary(RunSummaryRequested output) async {
+    try {
+      final summary = await _summaryBrain.generateSummary(
+        output.text,
+        output.prompt,
+      );
+      _summaryLogic.input(
+        SummaryComplete(summary, requestId: output.requestId),
+      );
+    } on Object catch (e) {
+      _summaryLogic.input(SummaryFailed(e, requestId: output.requestId));
+    }
+  }
+}

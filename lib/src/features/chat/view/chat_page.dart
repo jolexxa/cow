@@ -2,49 +2,49 @@ import 'dart:async';
 
 import 'package:blocterm/blocterm.dart';
 import 'package:cow/src/app/app_info.dart';
-import 'package:cow/src/features/chat/chat_bloc/chat_bloc.dart';
 import 'package:cow/src/features/chat/components/components.dart';
-import 'package:cow/src/features/chat/domain/domain.dart';
+import 'package:cow/src/features/chat/state/state.dart';
 import 'package:cow_brain/cow_brain.dart';
 import 'package:nocterm/nocterm.dart';
-
-const String _mainBrainKey = 'main';
-const String _summaryBrainKey = 'summary';
 
 class ChatPageView extends StatelessComponent {
   const ChatPageView({super.key});
 
   @override
   Component build(BuildContext context) {
-    return BlocProvider<ChatBloc>.create(
+    final appInfo = AppInfo.of(context);
+    return BlocProvider<ChatCubit>.create(
       create: (context) {
-        final appInfo = AppInfo.of(context);
         final brains = CowBrains<String>(
           libraryPath: appInfo.llamaRuntimeOptions.libraryPath,
+          modelServer: appInfo.modelServer,
         );
-        final session = SessionManager(
-          brains: brains,
-          mainKey: _mainBrainKey,
-          summaryKey: _summaryBrainKey,
-        )..create();
-        final summaryController = SummaryController(brain: session.summary);
+        final primaryBrain = brains.create(ChatCubit.primaryBrainKey);
+        final lightweightBrain = brains.create(ChatCubit.lightweightBrainKey);
+        final summaryBrain = SummaryBrain(brain: lightweightBrain);
+        final chatData = ChatData()
+          ..enableReasoning = appInfo.modelProfile.supportsReasoning;
+        final summaryLogic = SummaryLogic(chatData: chatData);
         final toolExecutor = ToolExecutor(
           toolRegistry: appInfo.toolRegistry,
-          brain: session.main,
+          brain: primaryBrain,
         );
-        final chatSession = ChatSession(
+        final logic = ChatLogic(chatData: chatData, brain: primaryBrain);
+        final chatCubit = ChatCubit(
+          logic: logic,
           toolRegistry: appInfo.toolRegistry,
           llamaRuntimeOptions: appInfo.llamaRuntimeOptions,
           modelProfile: appInfo.modelProfile,
           summaryRuntimeOptions: appInfo.summaryRuntimeOptions,
           summaryModelProfile: appInfo.summaryModelProfile,
-          session: session,
-          summaryController: summaryController,
+          brains: brains,
+          primaryBrain: primaryBrain,
+          summaryBrain: summaryBrain,
+          summaryLogic: summaryLogic,
           toolExecutor: toolExecutor,
         );
-        final bloc = ChatBloc(chatSession);
-        unawaited(Future.microtask(() => bloc.add(const ChatStarted())));
-        return bloc;
+        unawaited(Future.microtask(chatCubit.initialize));
+        return chatCubit;
       },
       child: const ChatPage(),
     );
@@ -64,12 +64,12 @@ class _ChatPageState extends State<ChatPage> {
       AutoScrollController();
   final TextEditingController _textController = TextEditingController();
 
-  late final ChatBloc _bloc;
+  late final ChatCubit _session;
 
   @override
   void initState() {
     super.initState();
-    _bloc = BlocProvider.of<ChatBloc>(context, listen: false);
+    _session = BlocProvider.of<ChatCubit>(context, listen: false);
   }
 
   @override
@@ -90,11 +90,13 @@ class _ChatPageState extends State<ChatPage> {
       return true;
     }
     if (event.matches(LogicalKey.keyR, ctrl: true) && !state.generating) {
-      _bloc.add(const ChatReset());
+      _session
+        ..clear()
+        ..reset();
       return true;
     }
     if (supportsReasoning && event.matches(LogicalKey.tab, shift: true)) {
-      _bloc.add(const ChatReasoningToggled());
+      _session.toggleReasoning();
       return true;
     }
     return false;
@@ -105,7 +107,7 @@ class _ChatPageState extends State<ChatPage> {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
     _textController.clear();
-    _bloc.add(ChatMessageSubmitted(text));
+    _session.submit(text);
   }
 
   Component _buildMessageList({
@@ -384,7 +386,7 @@ class _ChatPageState extends State<ChatPage> {
     final appInfo = AppInfo.of(context);
     final supportsReasoning = appInfo.modelProfile.supportsReasoning;
 
-    return BlocBuilder<ChatBloc, ChatState>(
+    return BlocBuilder<ChatCubit, ChatState>(
       builder: (context, state) {
         return LayoutBuilder(
           builder: (context, constraints) {

@@ -106,6 +106,18 @@ abstract class LlamaBindings {
     int p0,
     int p1,
   );
+
+  Pointer<Char> llama_model_chat_template(
+    Pointer<llama_model> model,
+    Pointer<Char> name,
+  );
+
+  int llama_model_meta_val_str(
+    Pointer<llama_model> model,
+    Pointer<Char> key,
+    Pointer<Char> buf,
+    int bufSize,
+  );
 }
 
 final class LlamaBindingsAdapter implements LlamaBindings {
@@ -308,6 +320,20 @@ final class LlamaBindingsAdapter implements LlamaBindings {
     int p0,
     int p1,
   ) => _bindings.llama_memory_seq_rm(mem, seqId, p0, p1);
+
+  @override
+  Pointer<Char> llama_model_chat_template(
+    Pointer<llama_model> model,
+    Pointer<Char> name,
+  ) => _bindings.llama_model_chat_template(model, name);
+
+  @override
+  int llama_model_meta_val_str(
+    Pointer<llama_model> model,
+    Pointer<Char> key,
+    Pointer<Char> buf,
+    int bufSize,
+  ) => _bindings.llama_model_meta_val_str(model, key, buf, bufSize);
 }
 
 final class LlamaBindingsLoader {

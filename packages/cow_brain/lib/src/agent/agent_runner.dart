@@ -7,20 +7,14 @@ import 'package:cow_brain/src/isolate/models.dart';
 typedef ToolExecutor = Future<List<ToolResult>> Function(List<ToolCall> calls);
 
 abstract interface class AgentRunner {
-  Stream<AgentEvent> runTurn(Conversation convo);
-
-  bool get enableReasoning;
-  set enableReasoning(bool value);
+  Stream<AgentEvent> runTurn(
+    Conversation convo, {
+    ToolExecutor? toolExecutor,
+    bool Function()? shouldCancel,
+    int maxSteps,
+    bool enableReasoning,
+  });
 
   int get contextSize;
   int get maxOutputTokens;
-
-  int get maxSteps;
-  set maxSteps(int value);
-
-  ToolExecutor? get toolExecutor;
-  set toolExecutor(ToolExecutor? value);
-
-  bool Function()? get shouldCancel;
-  set shouldCancel(bool Function()? value);
 }

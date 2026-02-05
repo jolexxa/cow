@@ -118,4 +118,76 @@ void main() {
       expect(textContent, 'hi');
     });
   });
+
+  group('StreamTokenizer with custom tags', () {
+    test('recognizes custom tags instead of defaults', () async {
+      final tokenizer = StreamTokenizer(
+        tags: const [
+          (tag: '[TOOL_CALLS]', type: StreamTokenType.toolStart),
+          (tag: '[/TOOL_CALLS]', type: StreamTokenType.toolEnd),
+        ],
+      );
+
+      final chunks = Stream<String>.fromIterable(
+        const ['Before[TOOL_CALLS]tool content[/TOOL_CALLS]After'],
+      );
+      final tokens = await tokenizer.tokenize(chunks).toList();
+
+      expect(tokens, hasLength(5));
+      expect(tokens[0].type, StreamTokenType.text);
+      expect(tokens[0].text, 'Before');
+      expect(tokens[1].type, StreamTokenType.toolStart);
+      expect(tokens[2].type, StreamTokenType.text);
+      expect(tokens[2].text, 'tool content');
+      expect(tokens[3].type, StreamTokenType.toolEnd);
+      expect(tokens[4].type, StreamTokenType.text);
+      expect(tokens[4].text, 'After');
+    });
+
+    test('does not recognize default tags when custom tags are set', () async {
+      final tokenizer = StreamTokenizer(
+        tags: const [
+          (tag: '[START]', type: StreamTokenType.toolStart),
+        ],
+      );
+
+      final chunks = Stream<String>.fromIterable(
+        const ['<think>not a tag</think>'],
+      );
+      final tokens = await tokenizer.tokenize(chunks).toList();
+
+      // The default <think> tags should be treated as plain text.
+      // May be split into multiple text tokens due to guard buffering.
+      expect(tokens.every((t) => t.type == StreamTokenType.text), isTrue);
+      final combined = tokens.map((t) => t.text).join();
+      expect(combined, '<think>not a tag</think>');
+    });
+
+    test('handles custom tags split across chunks', () async {
+      final tokenizer = StreamTokenizer(
+        tags: const [
+          (tag: '<<BEGIN>>', type: StreamTokenType.thinkStart),
+          (tag: '<<END>>', type: StreamTokenType.thinkEnd),
+        ],
+      );
+
+      final chunks = Stream<String>.fromIterable(const [
+        '<<BEG',
+        'IN>>content<<EN',
+        'D>>',
+      ]);
+      final tokens = await tokenizer.tokenize(chunks).toList();
+
+      final types = tokens.map((t) => t.type).toList();
+      expect(types, contains(StreamTokenType.thinkStart));
+      expect(types, contains(StreamTokenType.thinkEnd));
+
+      // Text between tags may be split due to guard buffering.
+      final textContent = tokens
+          .where((t) => t.type == StreamTokenType.text)
+          .map((t) => t.text)
+          .join();
+      expect(textContent, 'content');
+    });
+  });
 }

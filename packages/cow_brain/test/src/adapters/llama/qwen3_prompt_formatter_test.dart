@@ -271,15 +271,6 @@ void main() {
       expect(prompt, isNot(contains('<think>\nFollow up.')));
     });
 
-    test('roleNameForTesting returns role strings', () {
-      expect(Qwen3PromptFormatter.roleNameForTesting(Role.user), 'user');
-      expect(
-        Qwen3PromptFormatter.roleNameForTesting(Role.assistant),
-        'assistant',
-      );
-      expect(Qwen3PromptFormatter.roleNameForTesting(Role.tool), 'tool');
-    });
-
     test('lastUserMessageIndex handles missing user messages', () {
       final prompt = formatter.format(
         messages: const [
