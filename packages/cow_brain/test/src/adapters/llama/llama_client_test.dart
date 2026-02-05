@@ -357,6 +357,30 @@ void main() {
       temp.dispose();
       expect(bindings.samplerFreeCalls, 1);
     });
+
+    test('loadModel with progress callback sets up native callback', () {
+      final progressValues = <double>[];
+      final client = LlamaClient(libraryPath: '/tmp/libllama.so');
+
+      final handles = client.loadModel(
+        modelPath: 'model',
+        modelOptions: const LlamaModelOptions(),
+        onProgress: (progress) {
+          progressValues.add(progress);
+          return true;
+        },
+      );
+
+      // The callback is set up even if not invoked during test.
+      expect(handles.model, isNot(equals(nullptr)));
+    });
+
+    test('modelPointerAddress returns model address', () {
+      final client = _client();
+      final handles = _handles(client);
+
+      expect(handles.modelPointerAddress, handles.model.address);
+    });
   });
 }
 

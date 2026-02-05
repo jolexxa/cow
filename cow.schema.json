@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/joanna/cow/cow.schema.json",
+  "title": "Cow Config",
+  "description": "Configuration for cow (~/.cow/cow.json).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference."
+    },
+    "primaryModel": {
+      "type": "string",
+      "description": "ID of the model to use as the primary (heavy) model. Defaults to \"qwen3\".",
+      "enum": [
+        "qwen3",
+        "qwen25",
+        "qwen25_3b"
+      ]
+    },
+    "lightweightModel": {
+      "type": "string",
+      "description": "ID of the model to use as the lightweight model. Defaults to \"qwen25_3b\".",
+      "enum": [
+        "qwen3",
+        "qwen25",
+        "qwen25_3b"
+      ]
+    },
+    "models": {
+      "type": "object",
+      "description": "Map of model ID to model config. Built-in IDs (qwen3, qwen25, qwen25_3b) can be overridden; custom IDs define new models.",
+      "additionalProperties": {
+        "$ref": "#/$defs/CowModelConfig"
+      }
+    }
+  },
+  "$defs": {
+    "CowModelConfig": {
+      "type": "object",
+      "description": "Config for a single model entry.",
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "type": "array",
+          "description": "List of files to download for this model. Required for custom models.",
+          "items": {
+            "$ref": "#/$defs/CowModelFileConfig"
+          }
+        },
+        "entrypointFileName": {
+          "type": "string",
+          "description": "The filename of the main GGUF file to load. Required for custom models."
+        },
+        "modelFamily": {
+          "type": "string",
+          "description": "The model family determines the chat template (prompt format) used when talking to the model. Use \"auto\" to let the model decide.",
+          "enum": [
+            "qwen3",
+            "qwen25",
+            "auto"
+          ]
+        },
+        "supportsReasoning": {
+          "type": "boolean",
+          "description": "Whether this model supports reasoning (\"thinking\") tokens — internal chain-of-thought the model uses to work through a problem before responding."
+        },
+        "runtimeConfig": {
+          "$ref": "#/$defs/ModelRuntimeConfig"
+        }
+      }
+    },
+    "CowModelFileConfig": {
+      "type": "object",
+      "description": "A file to download for a model.",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "fileName"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL to download the file from."
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Local filename to save the downloaded file as."
+        }
+      }
+    },
+    "ModelRuntimeConfig": {
+      "type": "object",
+      "description": "Per-model runtime configuration. All fields are optional — omitted fields use defaults.",
+      "additionalProperties": false,
+      "properties": {
+        "contextSize": {
+          "type": "integer",
+          "description": "How many tokens (roughly ~¾ of a word each) the model can see at once, including the conversation history and its response. Larger values use more memory.",
+          "minimum": 1
+        },
+        "temperature": {
+          "type": "number",
+          "description": "Controls how random or creative the model's responses are. 0 = deterministic (always picks the most likely word), higher values = more varied and creative output.",
+          "minimum": 0
+        },
+        "topK": {
+          "type": "integer",
+          "description": "Limits the model to choosing from only the K most likely next words at each step. Lower values make output more focused; 0 disables the limit.",
+          "minimum": 0
+        },
+        "topP": {
+          "type": "number",
+          "description": "Only considers the smallest set of words whose combined probability exceeds this threshold. 0.9 means the model picks from words covering 90% of the probability mass — lower values = more focused output.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minP": {
+          "type": "number",
+          "description": "Filters out words whose probability is below this fraction of the most likely word's probability. Helps cut very unlikely words without a hard cutoff like topK.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "penaltyRepeat": {
+          "type": "number",
+          "description": "Discourages the model from repeating the same words. 1.0 = no penalty, higher values = stronger discouragement of repetition.",
+          "minimum": 0
+        },
+        "penaltyLastN": {
+          "type": "integer",
+          "description": "How many of the model's recent tokens to check for repetition when applying the repeat penalty. 0 disables the penalty entirely.",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

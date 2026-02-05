@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:blocterm/blocterm.dart';
 import 'package:cow/src/app/app_info.dart';
-import 'package:cow/src/app/app_model_profiles.dart';
 import 'package:cow/src/app/app_theme.dart';
 import 'package:cow/src/features/chat/chat.dart';
 import 'package:cow/src/features/startup/startup.dart';
@@ -51,14 +50,15 @@ class CowApp extends StatelessComponent {
         child: ChatPageView(),
       );
     }
-      return BlocProvider<StartupBloc>.create(
-        create: (context) => StartupBloc(
+    return BlocProvider<StartupCubit>.create(
+      create: (context) => StartupCubit(
         installProfiles: [
-          AppModelProfiles.primaryProfile,
-          AppModelProfiles.lightweightProfile,
+          appInfo.modelProfile.downloadableModel,
+          appInfo.summaryModelProfile.downloadableModel,
         ],
         cowPaths: AppInfo.of(context).cowPaths,
-        ),
+        logic: StartupLogic(),
+      ),
       child: const TuiTheme(
         data: appThemeBarnyard,
         child: AppStartupView(),

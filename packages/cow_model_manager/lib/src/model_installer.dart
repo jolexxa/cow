@@ -2,28 +2,28 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:clock/clock.dart';
-import 'package:cow_model_manager/src/cow_paths.dart';
-import 'package:cow_model_manager/src/model_specs.dart';
+import 'package:cow_model_manager/src/downloadable_model.dart';
 import 'package:cow_model_manager/src/progress.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
+import 'package:path/path.dart' as p;
 
 class ModelInstaller {
   ModelInstaller({
-    CowPaths? paths,
+    required String modelsDir,
     HttpClient? httpClient,
     http.Client? client,
     Clock? clock,
-  }) : paths = paths ?? CowPaths(),
+  }) : _modelsDir = modelsDir,
        _client = client ?? IOClient(httpClient ?? HttpClient()),
        _clock = clock ?? const Clock();
 
-  final CowPaths paths;
+  final String _modelsDir;
   final http.Client _client;
   final Clock _clock;
 
   Stream<ModelInstallProgress> ensureInstalled(
-    List<ModelProfileSpec> profiles, {
+    List<DownloadableModel> profiles, {
     ModelInstallController? controller,
   }) {
     final stream = StreamController<ModelInstallProgress>();
@@ -35,8 +35,8 @@ class ModelInstaller {
       var aborted = false;
 
       Future<void> emitProgress({
-        required ModelProfileSpec profile,
-        required ModelFileSpec file,
+        required DownloadableModel profile,
+        required DownloadableModelFile file,
         required int fileReceivedBytes,
         required int? fileTotalBytes,
         required bool fileCompleted,
@@ -61,8 +61,8 @@ class ModelInstaller {
       }
 
       Future<void> runFile({
-        required ModelProfileSpec profile,
-        required ModelFileSpec file,
+        required DownloadableModel profile,
+        required DownloadableModelFile file,
       }) async {
         if (controller?.cancelled ?? false) {
           throw const ModelInstallCancelled();
@@ -70,7 +70,7 @@ class ModelInstaller {
         if (aborted) {
           throw const ModelInstallCancelled();
         }
-        final targetPath = paths.modelFilePath(profile, file);
+        final targetPath = p.join(_modelsDir, profile.id, file.fileName);
         final targetFile = File(targetPath);
         if (targetFile.existsSync()) {
           final existingSize = targetFile.lengthSync();
@@ -179,7 +179,7 @@ class ModelInstaller {
       final tasks = <Future<void>>[];
       try {
         for (final profile in profiles) {
-          final profileDir = Directory(paths.modelDir(profile));
+          final profileDir = Directory(p.join(_modelsDir, profile.id));
           if (!profileDir.existsSync()) {
             profileDir.createSync(recursive: true);
           }

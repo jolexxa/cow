@@ -12,10 +12,15 @@ import 'package:ffi/ffi.dart';
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 import 'package:path/path.dart' as p;
 
+/// Callback for model loading progress.
+/// Returns true to continue loading, false to cancel.
+typedef ModelLoadProgressCallback = bool Function(double progress);
+
 abstract class LlamaClientApi {
   LlamaHandles loadModel({
     required String modelPath,
     required LlamaModelOptions modelOptions,
+    ModelLoadProgressCallback? onProgress,
   });
 
   List<int> tokenize(
@@ -78,6 +83,7 @@ final class LlamaClient implements LlamaClientApi {
   LlamaHandles loadModel({
     required String modelPath,
     required LlamaModelOptions modelOptions,
+    ModelLoadProgressCallback? onProgress,
   }) {
     final b = _ensureBindings();
     if (modelOptions.numa != null) {
@@ -101,9 +107,25 @@ final class LlamaClient implements LlamaClientApi {
       modelParams.check_tensors = modelOptions.checkTensors!;
     }
 
+    // Set up progress callback if provided
+    NativeCallable<llama_progress_callbackFunction>? nativeCallback;
+    if (onProgress != null) {
+      nativeCallback =
+          NativeCallable<llama_progress_callbackFunction>.isolateLocal(
+            // coverage:ignore-start
+            (double progress, Pointer<Void> userData) => onProgress(progress),
+            // coverage:ignore-end
+            exceptionalReturn: false,
+          );
+      modelParams.progress_callback = nativeCallback.nativeFunction;
+    }
+
     final modelPathPtr = modelPath.toNativeUtf8().cast<Char>();
     final model = b.llama_load_model_from_file(modelPathPtr, modelParams);
     calloc.free(modelPathPtr);
+
+    // Clean up native callback
+    nativeCallback?.close();
 
     if (model == nullptr) {
       throw StateError('Failed to load model: $modelPath');
@@ -162,14 +184,14 @@ final class LlamaClient implements LlamaClientApi {
     bool addSpecial = true,
     bool parseSpecial = true,
   }) {
-    final b = handles.bindings;
+    final bindings = handles.bindings;
     final textUtf8 = text.toNativeUtf8();
     final textPtr = textUtf8.cast<Char>();
     final textLen = textUtf8.length;
     var maxTokens = textLen + 8;
     var tokensPtr = calloc<llama_token>(maxTokens);
 
-    var n = b.llama_tokenize(
+    var n = bindings.llama_tokenize(
       handles.vocab,
       textPtr,
       textLen,
@@ -182,7 +204,7 @@ final class LlamaClient implements LlamaClientApi {
       calloc.free(tokensPtr);
       maxTokens = -n;
       tokensPtr = calloc<llama_token>(maxTokens);
-      n = b.llama_tokenize(
+      n = bindings.llama_tokenize(
         handles.vocab,
         textPtr,
         textLen,
@@ -204,49 +226,7 @@ final class LlamaClient implements LlamaClientApi {
     return result;
   }
 
-  String tokenToPiece(
-    LlamaHandles handles,
-    int token, {
-    int bufferSize = 256,
-  }) {
-    final b = handles.bindings;
-    var buf = calloc<Char>(bufferSize);
-    var n = b.llama_token_to_piece(
-      handles.vocab,
-      token,
-      buf,
-      bufferSize,
-      0,
-      true,
-    );
-
-    if (n < 0) {
-      calloc.free(buf);
-      final needed = -n + 1;
-      buf = calloc<Char>(needed);
-      n = b.llama_token_to_piece(
-        handles.vocab,
-        token,
-        buf,
-        needed,
-        0,
-        true,
-      );
-    }
-
-    if (n < 0) {
-      calloc.free(buf);
-      return '';
-    }
-
-    final bytes = buf.cast<Uint8>().asTypedList(n);
-    final text = utf8.decode(bytes, allowMalformed: true);
-    calloc.free(buf);
-    return text;
-  }
-
-  @override
-  Uint8List tokenToBytes(
+  Uint8List _tokenToPieceBytes(
     LlamaHandles handles,
     int token, {
     int bufferSize = 256,
@@ -284,6 +264,24 @@ final class LlamaClient implements LlamaClientApi {
     final bytes = Uint8List.fromList(buf.cast<Uint8>().asTypedList(n));
     calloc.free(buf);
     return bytes;
+  }
+
+  String tokenToPiece(
+    LlamaHandles handles,
+    int token, {
+    int bufferSize = 256,
+  }) {
+    final bytes = _tokenToPieceBytes(handles, token, bufferSize: bufferSize);
+    return bytes.isEmpty ? '' : utf8.decode(bytes, allowMalformed: true);
+  }
+
+  @override
+  Uint8List tokenToBytes(
+    LlamaHandles handles,
+    int token, {
+    int bufferSize = 256,
+  }) {
+    return _tokenToPieceBytes(handles, token, bufferSize: bufferSize);
   }
 
   @override

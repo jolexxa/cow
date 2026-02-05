@@ -2,10 +2,8 @@ import 'dart:async';
 
 import 'package:blocterm/blocterm.dart';
 import 'package:cow/src/app/app_info.dart';
-import 'package:cow/src/features/chat/chat.dart';
-import 'package:cow/src/features/startup/startup_bloc/startup_bloc.dart';
-import 'package:cow/src/features/startup/startup_bloc/startup_event.dart';
-import 'package:cow/src/features/startup/startup_bloc/startup_state.dart';
+import 'package:cow/src/features/chat/chat.dart' show ChatPageView;
+import 'package:cow/src/features/startup/state/state.dart';
 import 'package:nocterm/nocterm.dart';
 
 class AppStartupView extends StatefulComponent {
@@ -22,19 +20,19 @@ class _AppStartupViewState extends State<AppStartupView> {
     unawaited(
       Future<void>.delayed(Duration.zero).then((_) {
         if (!mounted) return;
-        BlocProvider.of<StartupBloc>(
+        BlocProvider.of<StartupCubit>(
           context,
           listen: false,
-        ).add(const AppStartupStarted());
+        ).start();
       }),
     );
   }
 
   @override
   Component build(BuildContext context) {
-    return BlocBuilder<StartupBloc, StartupState>(
+    return BlocBuilder<StartupCubit, StartupState>(
       builder: (context, state) {
-        if (state.status == StartupStatus.ready) {
+        if (state is ReadyState) {
           return const ChatPageView();
         }
         return const StartupPage();
@@ -53,19 +51,18 @@ class StartupPage extends StatefulComponent {
 class _StartupPageState extends State<StartupPage> {
   final ScrollController _scrollController = ScrollController();
 
-  bool _handleKeyEvent(KeyboardEvent event, StartupBloc bloc) {
+  bool _handleKeyEvent(KeyboardEvent event, StartupCubit cubit) {
     if (event.matches(LogicalKey.keyC, ctrl: true)) {
-      if (bloc.state.status == StartupStatus.downloading ||
-          bloc.state.status == StartupStatus.checking) {
-        bloc.add(const AppStartupCancelled());
+      if (cubit.state is DownloadingState || cubit.state is CheckingState) {
+        cubit.cancel();
       } else {
         AppInfo.of(context).platform.exit();
       }
       return true;
     }
     if (event.matches(LogicalKey.enter)) {
-      if (bloc.state.status == StartupStatus.awaitingInput) {
-        bloc.add(const AppStartupContinue());
+      if (cubit.state is AwaitingInputState) {
+        cubit.continueStartup();
         return true;
       }
     }
@@ -81,13 +78,14 @@ class _StartupPageState extends State<StartupPage> {
   @override
   Component build(BuildContext context) {
     final theme = TuiTheme.of(context);
-    final bloc = BlocProvider.of<StartupBloc>(context, listen: false);
+    final cubit = BlocProvider.of<StartupCubit>(context, listen: false);
 
-    return BlocBuilder<StartupBloc, StartupState>(
+    return BlocBuilder<StartupCubit, StartupState>(
       builder: (context, state) {
         final progress = state.progress;
-        final totalReceivedBytes = _sumReceivedBytes(state.files);
-        final totalBytes = _totalBytesOrNull(state.files);
+        final files = state.files.values;
+        final totalReceivedBytes = _sumReceivedBytes(files);
+        final totalBytes = _totalBytesOrNull(files);
         final totalProgressText = _formatTotalProgressText(
           totalReceivedBytes,
           totalBytes,
@@ -101,15 +99,13 @@ class _StartupPageState extends State<StartupPage> {
             : 'Files: ${state.completedFiles}/${state.totalFiles}';
         final showTotal = state.totalFiles > 1;
 
-        final statusLine = switch (state.status) {
-          StartupStatus.checking => 'Checking models...',
-          StartupStatus.downloading => _downloadStatusLine(
-            filesText,
-            speedText,
-          ),
-          StartupStatus.awaitingInput => 'Models installed.',
-          StartupStatus.error => 'Download failed',
-          StartupStatus.ready => 'Ready',
+        final statusLine = switch (state) {
+          UninitializedState() => 'Starting...',
+          CheckingState() => 'Checking models...',
+          DownloadingState() => _downloadStatusLine(filesText, speedText),
+          AwaitingInputState() => 'Models installed.',
+          ErrorState() => 'Download failed',
+          ReadyState() => 'Ready',
         };
 
         final totalPercent = switch (totalBytes ?? 0) {
@@ -117,14 +113,14 @@ class _StartupPageState extends State<StartupPage> {
           _ => _clamp01(totalReceivedBytes / totalBytes!),
         };
 
-        final fileRows = _buildFileRows(state.files, theme);
+        final fileRows = _buildFileRows(files, theme);
 
         return Container(
           padding: const EdgeInsets.all(1),
           color: theme.background,
           child: Focusable(
             focused: true,
-            onKeyEvent: (event) => _handleKeyEvent(event, bloc),
+            onKeyEvent: (event) => _handleKeyEvent(event, cubit),
             child: Container(
               color: theme.background,
               child: Center(
@@ -239,7 +235,7 @@ class _StartupPageState extends State<StartupPage> {
           style: TextStyle(color: theme.primary),
           textAlign: TextAlign.center,
         ),
-        if (state.status == StartupStatus.awaitingInput)
+        if (state is AwaitingInputState)
           Text(
             'Press Enter to continue',
             style: TextStyle(
@@ -247,7 +243,7 @@ class _StartupPageState extends State<StartupPage> {
             ),
             textAlign: TextAlign.center,
           ),
-        if (state.status == StartupStatus.error && state.error != null)
+        if (state is ErrorState && state.error != null)
           Text(
             state.error!,
             style: TextStyle(color: theme.error),
@@ -368,7 +364,7 @@ class _StartupPageState extends State<StartupPage> {
     return value;
   }
 
-  int _sumReceivedBytes(List<StartupFileState> files) {
+  int _sumReceivedBytes(Iterable<StartupFileState> files) {
     var total = 0;
     for (final file in files) {
       total += file.receivedBytes;
@@ -376,12 +372,13 @@ class _StartupPageState extends State<StartupPage> {
     return total;
   }
 
-  int? _totalBytesOrNull(List<StartupFileState> files) {
-    if (files.isEmpty) {
+  int? _totalBytesOrNull(Iterable<StartupFileState> files) {
+    final list = files.toList();
+    if (list.isEmpty) {
       return null;
     }
     var total = 0;
-    for (final file in files) {
+    for (final file in list) {
       final fileTotal = file.totalBytes;
       if (fileTotal == null || fileTotal <= 0) {
         return null;
@@ -392,15 +389,16 @@ class _StartupPageState extends State<StartupPage> {
   }
 
   List<Component> _buildFileRows(
-    List<StartupFileState> files,
+    Iterable<StartupFileState> files,
     TuiThemeData theme,
   ) {
-    if (files.isEmpty) {
+    final list = files.toList();
+    if (list.isEmpty) {
       return const <Component>[];
     }
     final rows = <Component>[];
-    for (var i = 0; i < files.length; i += 1) {
-      final file = files[i];
+    for (var i = 0; i < list.length; i += 1) {
+      final file = list[i];
       final label = file.label;
       final style = _fileRowStyle(file, theme);
 
@@ -432,7 +430,7 @@ class _StartupPageState extends State<StartupPage> {
             ],
           ),
         );
-      if (i < files.length - 1) {
+      if (i < list.length - 1) {
         rows.add(const Divider());
       }
     }

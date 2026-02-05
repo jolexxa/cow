@@ -147,6 +147,27 @@ void main() {
       expect(adapter.llama_memory_seq_pos_max(fake.memoryPtr, 0), 20);
       expect(adapter.llama_memory_seq_rm(fake.memoryPtr, 0, 0, 4), isTrue);
 
+      expect(
+        adapter.llama_model_chat_template(fake.modelPtr, nullptr.cast()),
+        same(fake.chatTemplatePtr),
+      );
+      expect(fake.chatTemplateCalls, 1);
+
+      final metaBuf = calloc<Char>(64);
+      final metaKey = 'general.name'.toNativeUtf8().cast<Char>();
+      expect(
+        adapter.llama_model_meta_val_str(
+          fake.modelPtr,
+          metaKey,
+          metaBuf,
+          64,
+        ),
+        42,
+      );
+      expect(fake.metaValStrCalls, 1);
+      calloc.free(metaBuf);
+      malloc.free(metaKey);
+
       calloc.free(tokens);
       calloc.free(buf);
       fake.dispose();
@@ -207,6 +228,9 @@ final class FakeCppBindings extends LlamaCppBindings {
   int tokenToPieceCalls = 0;
   int chainAddCalls = 0;
   int samplerFreeCalls = 0;
+  int chatTemplateCalls = 0;
+  int metaValStrCalls = 0;
+  final Pointer<Char> chatTemplatePtr = Pointer.fromAddress(99);
   ggml_numa_strategy? lastNuma;
 
   void dispose() {
@@ -406,4 +430,24 @@ final class FakeCppBindings extends LlamaCppBindings {
   @override
   bool llama_memory_seq_rm(llama_memory_t mem, int seqId, int p0, int p1) =>
       true;
+
+  @override
+  Pointer<Char> llama_model_chat_template(
+    Pointer<llama_model> model,
+    Pointer<Char> name,
+  ) {
+    chatTemplateCalls += 1;
+    return chatTemplatePtr;
+  }
+
+  @override
+  int llama_model_meta_val_str(
+    Pointer<llama_model> model,
+    Pointer<Char> key,
+    Pointer<Char> buf,
+    int bufSize,
+  ) {
+    metaValStrCalls += 1;
+    return 42;
+  }
 }

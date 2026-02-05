@@ -2,9 +2,10 @@
 import 'dart:isolate';
 
 import 'package:cow_brain/src/adapters/llama/llama.dart';
-import 'package:cow_brain/src/cow_brain_api.dart';
+import 'package:cow_brain/src/cow_brain.dart';
 import 'package:cow_brain/src/isolate/brain_harness.dart';
 import 'package:cow_brain/src/isolate/models.dart';
+import 'package:cow_brain/src/model_server/model_server.dart';
 import 'package:test/test.dart';
 
 import '../fixtures/fake_bindings.dart';
@@ -38,6 +39,36 @@ void _fakeBrainIsolate(SendPort sendPort) {
   });
 }
 
+void _fakeModelServerIsolate(SendPort sendPort) {
+  final receivePort = ReceivePort();
+  sendPort.send(receivePort.sendPort);
+
+  var modelCounter = 1;
+
+  receivePort.listen((message) {
+    if (message is! Map) return;
+    final request = ModelServerRequest.fromJson(
+      Map<String, Object?>.from(message),
+    );
+
+    switch (request) {
+      case LoadModelRequest():
+        sendPort.send(
+          ModelLoadedResponse(
+            modelPath: request.modelPath,
+            modelPointer: modelCounter++,
+          ).toJson(),
+        );
+      case UnloadModelRequest():
+        sendPort.send(
+          ModelUnloadedResponse(modelPath: request.modelPath).toJson(),
+        );
+      case DisposeModelServerRequest():
+        receivePort.close();
+    }
+  });
+}
+
 void main() {
   group('CowBrain', () {
     setUp(() {
@@ -61,6 +92,7 @@ void main() {
       );
 
       await brain.init(
+        modelPointer: 1,
         runtimeOptions: _runtimeOptions(),
         profile: LlamaProfileId.qwen3,
         tools: const <ToolDefinition>[],
@@ -97,14 +129,52 @@ void main() {
     setUp(() {
       LlamaClient.openBindings = ({required String libraryPath}) =>
           FakeLlamaBindings();
+      modelServerIsolateEntryOverride = _fakeModelServerIsolate;
     });
 
     tearDown(() {
       LlamaClient.openBindings = LlamaBindingsLoader.open;
+      modelServerIsolateEntryOverride = null;
+    });
+
+    test('create works before loadModel but modelPointer throws', () async {
+      final modelServer = await ModelServer.spawn();
+      final brains = CowBrains<String>(
+        libraryPath: '/tmp/libllama.so',
+        modelServer: modelServer,
+      );
+      // Can create brain before loading model.
+      final brain = brains.create('a');
+      expect(brain, isNotNull);
+      // But modelPointer throws for unloaded path.
+      expect(() => brains.modelPointer('/tmp/model.gguf'), throwsStateError);
+      await brains.dispose();
+    });
+
+    test('modelPointer throws for unloaded model', () async {
+      final modelServer = await ModelServer.spawn();
+      final brains = CowBrains<String>(
+        libraryPath: '/tmp/libllama.so',
+        modelServer: modelServer,
+      );
+      expect(() => brains.modelPointer('/tmp/model.gguf'), throwsStateError);
+      await brains.dispose();
     });
 
     test('creates, reuses, removes, and disposes brains', () async {
-      final brains = CowBrains<String>(libraryPath: '/tmp/libllama.so');
+      final modelServer = await ModelServer.spawn();
+      final brains = CowBrains<String>(
+        libraryPath: '/tmp/libllama.so',
+        modelServer: modelServer,
+      );
+
+      // Load model first.
+      const modelPath = '/tmp/model.gguf';
+      final model = await brains.loadModel(modelPath: modelPath);
+      expect(model.modelPointer, isPositive);
+      expect(model.modelPath, modelPath);
+      expect(brains.modelPointer(modelPath), model.modelPointer);
+
       final harnessA = BrainHarness(entrypoint: _fakeBrainIsolate);
       final harnessB = BrainHarness(entrypoint: _fakeBrainIsolate);
 
@@ -122,6 +192,7 @@ void main() {
       expect(brains.values.length, 3);
 
       await brainA.init(
+        modelPointer: model.modelPointer,
         runtimeOptions: _runtimeOptions(),
         profile: LlamaProfileId.qwen3,
         tools: const <ToolDefinition>[],
@@ -129,6 +200,7 @@ void main() {
         enableReasoning: true,
       );
       await brainB.init(
+        modelPointer: model.modelPointer,
         runtimeOptions: _runtimeOptions(),
         profile: LlamaProfileId.qwen3,
         tools: const <ToolDefinition>[],

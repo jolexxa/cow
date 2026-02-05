@@ -94,6 +94,7 @@ LlamaRuntimeOptions _$LlamaRuntimeOptionsFromJson(Map<String, dynamic> json) =>
       contextOptions: LlamaContextOptions.fromJson(
         json['contextOptions'] as Map<String, dynamic>,
       ),
+      libraryPath: json['libraryPath'] as String,
       modelOptions: json['modelOptions'] == null
           ? const LlamaModelOptions()
           : LlamaModelOptions.fromJson(
@@ -106,7 +107,6 @@ LlamaRuntimeOptions _$LlamaRuntimeOptionsFromJson(Map<String, dynamic> json) =>
             ),
       maxOutputTokensDefault:
           (json['maxOutputTokensDefault'] as num?)?.toInt() ?? 512,
-      libraryPath: json['libraryPath'] as String,
     );
 
 Map<String, dynamic> _$LlamaRuntimeOptionsToJson(
@@ -198,6 +198,7 @@ Map<String, dynamic> _$AgentSettingsToJson(AgentSettings instance) =>
     };
 
 InitRequest _$InitRequestFromJson(Map<String, dynamic> json) => InitRequest(
+  modelPointer: (json['modelPointer'] as num).toInt(),
   runtimeOptions: LlamaRuntimeOptions.fromJson(
     json['runtimeOptions'] as Map<String, dynamic>,
   ),
@@ -215,6 +216,7 @@ InitRequest _$InitRequestFromJson(Map<String, dynamic> json) => InitRequest(
 
 Map<String, dynamic> _$InitRequestToJson(InitRequest instance) =>
     <String, dynamic>{
+      'modelPointer': instance.modelPointer,
       'runtimeOptions': instance.runtimeOptions.toJson(),
       'profile': _$LlamaProfileIdEnumMap[instance.profile]!,
       'tools': instance.tools.map((e) => e.toJson()).toList(),
@@ -225,7 +227,7 @@ Map<String, dynamic> _$InitRequestToJson(InitRequest instance) =>
 const _$LlamaProfileIdEnumMap = {
   LlamaProfileId.qwen3: 'qwen3',
   LlamaProfileId.qwen25: 'qwen25',
-  LlamaProfileId.qwen25_3b: 'qwen25_3b',
+  LlamaProfileId.auto: 'auto',
 };
 
 RunTurnRequest _$RunTurnRequestFromJson(

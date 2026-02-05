@@ -4,6 +4,15 @@
 import 'package:cow_brain/src/adapters/llama/llama_stream_parser.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 
+extension RoleName on Role {
+  String get roleName => switch (this) {
+    Role.system => 'system',
+    Role.user => 'user',
+    Role.assistant => 'assistant',
+    Role.tool => 'tool',
+  };
+}
+
 abstract interface class LlamaPromptFormatter {
   String format({
     required List<Message> messages,

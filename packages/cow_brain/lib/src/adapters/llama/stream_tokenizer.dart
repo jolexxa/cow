@@ -21,11 +21,41 @@ enum StreamTokenType {
 /// A token emitted by the stream tokenizer.
 typedef StreamToken = ({StreamTokenType type, String? text});
 
+/// Defines a mapping from a tag string to a [StreamTokenType].
+typedef TagDefinition = ({String tag, StreamTokenType type});
+
 /// Tokenizes a stream of string chunks into a stream of typed tokens.
 ///
 /// Handles tag boundaries across chunk boundaries by buffering and using
 /// a guard length to avoid flushing partial tags.
 final class StreamTokenizer {
+  /// Creates a tokenizer with optional custom [tags].
+  ///
+  /// When [tags] is null, the default ChatML/Qwen tags are used.
+  StreamTokenizer({List<TagDefinition>? tags})
+    : _tags = tags ?? defaultTags,
+      _maxTagLength = _computeMaxTagLength(tags ?? defaultTags);
+
+  final List<TagDefinition> _tags;
+  final int _maxTagLength;
+
+  /// Default ChatML/Qwen tags: `<think>`, `</think>`, `<tool_call>`,
+  /// `</tool_call>`.
+  static const defaultTags = <TagDefinition>[
+    (tag: '<think>', type: StreamTokenType.thinkStart),
+    (tag: '</think>', type: StreamTokenType.thinkEnd),
+    (tag: '<tool_call>', type: StreamTokenType.toolStart),
+    (tag: '</tool_call>', type: StreamTokenType.toolEnd),
+  ];
+
+  static int _computeMaxTagLength(List<TagDefinition> tags) {
+    var max = 0;
+    for (final t in tags) {
+      if (t.tag.length > max) max = t.tag.length;
+    }
+    return max;
+  }
+
   /// Tokenizes a stream of string chunks into typed tokens.
   Stream<StreamToken> tokenize(Stream<String> chunks) async* {
     final buffer = StringBuffer();
@@ -69,25 +99,12 @@ final class StreamTokenizer {
     }
   }
 
-  static const _tags = <(String, StreamTokenType)>[
-    ('<think>', StreamTokenType.thinkStart),
-    ('</think>', StreamTokenType.thinkEnd),
-    ('<tool_call>', StreamTokenType.toolStart),
-    ('</tool_call>', StreamTokenType.toolEnd),
-  ];
-
-  static final int _maxTagLength = _tags
-      .map((t) => t.$1.length)
-      .reduce(
-        (a, b) => a > b ? a : b,
-      );
-
-  static ({int index, int length, StreamTokenType type})? _findEarliestTag(
+  ({int index, int length, StreamTokenType type})? _findEarliestTag(
     String buffer,
   ) {
     ({int index, int length, StreamTokenType type})? earliest;
 
-    for (final (tag, type) in _tags) {
+    for (final (:tag, :type) in _tags) {
       final index = buffer.indexOf(tag);
       if (index == -1) continue;
       if (earliest == null || index < earliest.index) {

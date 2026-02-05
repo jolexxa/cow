@@ -111,7 +111,6 @@ final class Qwen3PromptFormatter implements LlamaPromptFormatter {
   }) {
     final buffer = StringBuffer();
     final toolList = tools;
-    _lastUserMessageIndex(messages);
 
     if (!systemApplied) {
       if (toolList.isNotEmpty) {
@@ -171,7 +170,7 @@ final class Qwen3PromptFormatter implements LlamaPromptFormatter {
             continue;
           }
           buffer
-            ..write('<|im_start|>${_roleName(message.role)}\n')
+            ..write('<|im_start|>${message.role.roleName}\n')
             ..write(message.content)
             ..write('<|im_end|>\n');
         case Role.assistant:
@@ -194,19 +193,19 @@ final class Qwen3PromptFormatter implements LlamaPromptFormatter {
           if (i > lastQueryIndex) {
             if (i == messages.length - 1 || reasoningContent.isNotEmpty) {
               buffer
-                ..write('<|im_start|>${_roleName(message.role)}\n')
+                ..write('<|im_start|>${message.role.roleName}\n')
                 ..write('<think>\n')
                 ..write(_stripEdgeNewlines(reasoningContent))
                 ..write('\n</think>\n\n')
                 ..write(_stripLeadingNewlines(content));
             } else {
               buffer
-                ..write('<|im_start|>${_roleName(message.role)}\n')
+                ..write('<|im_start|>${message.role.roleName}\n')
                 ..write(content);
             }
           } else {
             buffer
-              ..write('<|im_start|>${_roleName(message.role)}\n')
+              ..write('<|im_start|>${message.role.roleName}\n')
               ..write(content);
           }
 
@@ -269,26 +268,6 @@ final class Qwen3PromptFormatter implements LlamaPromptFormatter {
         'parameters': tool.parameters,
       },
     };
-  }
-
-  static String _roleName(Role role) {
-    return switch (role) {
-      Role.system => 'system',
-      Role.user => 'user',
-      Role.assistant => 'assistant',
-      Role.tool => 'tool',
-    };
-  }
-
-  static String roleNameForTesting(Role role) => _roleName(role);
-
-  static int _lastUserMessageIndex(List<Message> messages) {
-    for (var i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role == Role.user) {
-        return i;
-      }
-    }
-    return -1;
   }
 
   static String _stripLeadingNewlines(String value) {

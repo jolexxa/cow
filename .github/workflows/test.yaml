@@ -18,6 +18,8 @@ jobs:
     with:
       working_directory: packages/cow_brain
       min_coverage: 100
+      dart_sdk: beta
+      check_ignore: true
       setup: |
         cd "$GITHUB_WORKSPACE"
         git submodule update --init --recursive
@@ -30,9 +32,11 @@ jobs:
     with:
       working_directory: packages/blocterm
       min_coverage: 100
+      dart_sdk: beta
 
   cow_model_manager:
     uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/dart_package.yml@v1
     with:
       working_directory: packages/cow_model_manager
       min_coverage: 100
+      dart_sdk: beta

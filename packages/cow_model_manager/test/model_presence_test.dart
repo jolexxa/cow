@@ -1,35 +1,38 @@
 import 'dart:io';
 
 import 'package:cow_model_manager/cow_model_manager.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 void main() {
   test('profileFilesPresent returns true only when all files exist', () async {
     final tempDir = await Directory.systemTemp.createTemp('cow-presence-');
     try {
-      final profile = ModelProfileSpec(
+      final profile = DownloadableModel(
         id: 'presence',
-        supportsReasoning: false,
+
         files: const [
-          ModelFileSpec(url: 'https://example.com/a', fileName: 'a.bin'),
-          ModelFileSpec(url: 'https://example.com/b', fileName: 'b.bin'),
+          DownloadableModelFile(
+            url: 'https://example.com/a',
+            fileName: 'a.bin',
+          ),
+          DownloadableModelFile(
+            url: 'https://example.com/b',
+            fileName: 'b.bin',
+          ),
         ],
         entrypointFileName: 'a.bin',
       );
-      final paths = CowPaths(homeDir: tempDir.path);
+      final modelsDir = p.join(tempDir.path, '.cow', 'models');
 
-      Directory(paths.modelDir(profile)).createSync(recursive: true);
-      File(
-        paths.modelFilePath(profile, profile.files[0]),
-      ).writeAsBytesSync([1, 2]);
-      File(
-        paths.modelFilePath(profile, profile.files[1]),
-      ).writeAsBytesSync([3, 4]);
+      Directory(p.join(modelsDir, profile.id)).createSync(recursive: true);
+      File(p.join(modelsDir, profile.id, 'a.bin')).writeAsBytesSync([1, 2]);
+      File(p.join(modelsDir, profile.id, 'b.bin')).writeAsBytesSync([3, 4]);
 
-      expect(profileFilesPresent(profile, paths), isTrue);
+      expect(profileFilesPresent(profile, modelsDir), isTrue);
 
-      File(paths.modelFilePath(profile, profile.files[1])).deleteSync();
-      expect(profileFilesPresent(profile, paths), isFalse);
+      File(p.join(modelsDir, profile.id, 'b.bin')).deleteSync();
+      expect(profileFilesPresent(profile, modelsDir), isFalse);
     } finally {
       tempDir.deleteSync(recursive: true);
     }
@@ -40,37 +43,39 @@ void main() {
     () async {
       final tempDir = await Directory.systemTemp.createTemp('cow-profiles-');
       try {
-        final profileA = ModelProfileSpec(
+        final profileA = DownloadableModel(
           id: 'a',
-          supportsReasoning: false,
+
           files: const [
-            ModelFileSpec(url: 'https://example.com/a', fileName: 'a.bin'),
+            DownloadableModelFile(
+              url: 'https://example.com/a',
+              fileName: 'a.bin',
+            ),
           ],
           entrypointFileName: 'a.bin',
         );
-        final profileB = ModelProfileSpec(
+        final profileB = DownloadableModel(
           id: 'b',
-          supportsReasoning: true,
+
           files: const [
-            ModelFileSpec(url: 'https://example.com/b', fileName: 'b.bin'),
+            DownloadableModelFile(
+              url: 'https://example.com/b',
+              fileName: 'b.bin',
+            ),
           ],
           entrypointFileName: 'b.bin',
         );
-        final paths = CowPaths(homeDir: tempDir.path);
+        final modelsDir = p.join(tempDir.path, '.cow', 'models');
 
-        Directory(paths.modelDir(profileA)).createSync(recursive: true);
-        File(
-          paths.modelFilePath(profileA, profileA.files.single),
-        ).writeAsBytesSync([1]);
+        Directory(p.join(modelsDir, 'a')).createSync(recursive: true);
+        File(p.join(modelsDir, 'a', 'a.bin')).writeAsBytesSync([1]);
 
-        expect(profilesPresent([profileA, profileB], paths), isFalse);
+        expect(profilesPresent([profileA, profileB], modelsDir), isFalse);
 
-        Directory(paths.modelDir(profileB)).createSync(recursive: true);
-        File(
-          paths.modelFilePath(profileB, profileB.files.single),
-        ).writeAsBytesSync([2]);
+        Directory(p.join(modelsDir, 'b')).createSync(recursive: true);
+        File(p.join(modelsDir, 'b', 'b.bin')).writeAsBytesSync([2]);
 
-        expect(profilesPresent([profileA, profileB], paths), isTrue);
+        expect(profilesPresent([profileA, profileB], modelsDir), isTrue);
       } finally {
         tempDir.deleteSync(recursive: true);
       }

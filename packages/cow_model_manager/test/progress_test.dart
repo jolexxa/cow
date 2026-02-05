@@ -18,10 +18,12 @@ void main() {
   });
 
   test('ModelInstallProgress stores values', () {
-    const file = ModelFileSpec(url: 'https://example.com/a', fileName: 'a.bin');
-    final profile = ModelProfileSpec(
+    const file = DownloadableModelFile(
+      url: 'https://example.com/a',
+      fileName: 'a.bin',
+    );
+    final profile = DownloadableModel(
       id: 'alpha',
-      supportsReasoning: true,
       files: const [file],
       entrypointFileName: 'a.bin',
     );

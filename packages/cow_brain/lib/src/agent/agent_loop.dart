@@ -18,10 +18,6 @@ final class AgentLoop implements AgentRunner {
     required this.contextSize,
     required this.maxOutputTokens,
     required this.temperature,
-    this.toolExecutor,
-    this.shouldCancel,
-    this.maxSteps = 8,
-    this.enableReasoning = true,
   }) : _llm = llm,
        _tools = tools,
        _context = context;
@@ -29,27 +25,24 @@ final class AgentLoop implements AgentRunner {
   final LlmAdapter _llm;
   final ToolRegistry _tools;
   final ContextManager _context;
-  @override
-  ToolExecutor? toolExecutor;
-  @override
-  bool Function()? shouldCancel;
+
   @override
   final int contextSize;
   @override
   final int maxOutputTokens;
   final double temperature;
-  @override
-  int maxSteps;
-
-  /// Whether to enable thinking/reasoning mode (for models that support it).
-  @override
-  bool enableReasoning;
 
   // Tracks previous reasoning state to detect toggles requiring context reset.
   bool? _lastEnableReasoning;
 
   @override
-  Stream<AgentEvent> runTurn(Conversation convo) async* {
+  Stream<AgentEvent> runTurn(
+    Conversation convo, {
+    ToolExecutor? toolExecutor,
+    bool Function()? shouldCancel,
+    int maxSteps = 8,
+    bool enableReasoning = true,
+  }) async* {
     final turnId = convo.beginTurn();
     var steps = 0;
     var systemApplied = convo.systemApplied;

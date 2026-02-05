@@ -40,8 +40,8 @@ enum LlamaProfileId {
   qwen3,
   @JsonValue('qwen25')
   qwen25,
-  @JsonValue('qwen25_3b')
-  qwen25_3b,
+  @JsonValue('auto')
+  auto,
 }
 
 @JsonEnum(alwaysCreate: true)
@@ -271,6 +271,7 @@ class AgentSettings {
 @JsonSerializable(explicitToJson: true)
 class InitRequest {
   const InitRequest({
+    required this.modelPointer,
     required this.runtimeOptions,
     required this.profile,
     required this.tools,
@@ -279,6 +280,9 @@ class InitRequest {
   });
   factory InitRequest.fromJson(Map<String, Object?> json) =>
       _$InitRequestFromJson(json);
+
+  /// Address of the preloaded llama_model pointer from ModelServer.
+  final int modelPointer;
   final LlamaRuntimeOptions runtimeOptions;
   @JsonKey(unknownEnumValue: LlamaProfileId.qwen3)
   final LlamaProfileId profile;

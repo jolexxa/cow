@@ -16,10 +16,11 @@ void main() {
       expect(profile, same(LlamaProfiles.qwen25));
     });
 
-    test('profileFor returns qwen25 profile for qwen25_3b', () {
-      final profile = LlamaProfiles.profileFor(LlamaProfileId.qwen25_3b);
-
-      expect(profile, same(LlamaProfiles.qwen25));
+    test('profileFor throws for auto', () {
+      expect(
+        () => LlamaProfiles.profileFor(LlamaProfileId.auto),
+        throwsArgumentError,
+      );
     });
   });
 }

@@ -1,5 +1,5 @@
 name: cow_model_manager
-description: Model installer + path management for Cow.
+description: Model installer for Cow.
 version: 0.0.1
 publish_to: none
 
@@ -11,7 +11,6 @@ dependencies:
   http: ^1.2.2
   meta: ^1.18.0
   path: ^1.9.1
-  platform: ^3.1.5
 
 dev_dependencies:
   coverage: ^1.15.0

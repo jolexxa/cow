@@ -21,7 +21,13 @@ sealed class OSPlatform {
 
   int get nGpuLayers;
 
-  int defaultThreadCount();
+  int defaultThreadCount() {
+    final cores = Platform.numberOfProcessors;
+    if (cores <= 4) {
+      return cores - 1;
+    }
+    return cores - 2;
+  }
 
   /// Shuts down the terminal and exits the process with the given [code].
   void exit([int code = 0]) {
@@ -99,15 +105,6 @@ class MacOS extends OSPlatform {
       'libllama.0.dylib',
     );
   }
-
-  @override
-  int defaultThreadCount() {
-    final cores = Platform.numberOfProcessors;
-    if (cores <= 4) {
-      return cores - 1;
-    }
-    return cores - 2;
-  }
 }
 
 class Linux extends OSPlatform {
@@ -164,14 +161,5 @@ class Linux extends OSPlatform {
       'x64',
       'libllama.so',
     );
-  }
-
-  @override
-  int defaultThreadCount() {
-    final cores = Platform.numberOfProcessors;
-    if (cores <= 4) {
-      return cores - 1;
-    }
-    return cores - 2;
   }
 }

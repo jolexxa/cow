@@ -14,51 +14,13 @@ import '../../../fixtures/fake_bindings.dart';
 
 void main() {
   group('LlamaCppRuntime', () {
-    test('creates default client when none is provided', () {
-      final bindings = FakeLlamaBindings()
-        ..tokenizeImpl =
-            (
-              _,
-              _,
-              _,
-              Pointer<llama_token> tokens,
-              _,
-              _,
-              _,
-            ) {
-              tokens[0] = 1;
-              return 1;
-            };
-      LlamaClient.openBindings = ({required String libraryPath}) => bindings;
-      addTearDown(() {
-        LlamaClient.openBindings = LlamaBindingsLoader.open;
-      });
-
-      final runtime = LlamaCppRuntime(
-        options: const LlamaRuntimeOptions(
-          modelPath: 'model',
-          libraryPath: '/tmp/libllama.so',
-          contextOptions: LlamaContextOptions(
-            contextSize: 32,
-            nBatch: 4,
-            nThreads: 1,
-            nThreadsBatch: 1,
-          ),
-          maxOutputTokensDefault: 4,
-        ),
-      );
-
-      final count = runtime.countTokens('hi', addBos: true);
-      expect(count, 1);
-      runtime.dispose();
-    });
-
     test('throws when prompt exceeds context size', () async {
       final bindings = FakeLlamaBindings();
       final client = FakeClient(bindings)
         ..tokenizeResult = List<int>.filled(50, 1);
 
       final runtime = LlamaCppRuntime(
+        modelPointer: 1,
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
@@ -71,6 +33,7 @@ void main() {
           maxOutputTokensDefault: 20,
         ),
         client: client,
+        bindings: bindings,
       );
 
       expect(
@@ -95,6 +58,7 @@ void main() {
         ..tokenizeResult = List<int>.filled(6, 1);
 
       final runtime = LlamaCppRuntime(
+        modelPointer: 1,
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
@@ -107,6 +71,7 @@ void main() {
           maxOutputTokensDefault: 4,
         ),
         client: client,
+        bindings: bindings,
       );
 
       await runtime
@@ -131,6 +96,7 @@ void main() {
         ..tokenizeResult = List<int>.filled(5, 1);
 
       final runtime = LlamaCppRuntime(
+        modelPointer: 1,
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
@@ -143,6 +109,7 @@ void main() {
           maxOutputTokensDefault: 6,
         ),
         client: client,
+        bindings: bindings,
       );
 
       expect(
@@ -166,6 +133,7 @@ void main() {
         ..sampleQueue.add(999);
 
       final runtime = LlamaCppRuntime(
+        modelPointer: 1,
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
@@ -178,6 +146,7 @@ void main() {
           maxOutputTokensDefault: 4,
         ),
         client: client,
+        bindings: bindings,
       );
 
       await runtime
@@ -205,6 +174,7 @@ void main() {
         ..sampleQueue.addAll([1, 2, 3, 4]);
 
       final runtime = LlamaCppRuntime(
+        modelPointer: 1,
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
@@ -217,6 +187,7 @@ void main() {
           maxOutputTokensDefault: 10,
         ),
         client: client,
+        bindings: bindings,
       );
 
       final outputs = await runtime
@@ -240,6 +211,7 @@ void main() {
         ..sampleQueue.add(999);
 
       final runtime = LlamaCppRuntime(
+        modelPointer: 1,
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
@@ -252,6 +224,7 @@ void main() {
           maxOutputTokensDefault: 2,
         ),
         client: client,
+        bindings: bindings,
       );
 
       await runtime
@@ -276,6 +249,7 @@ void main() {
           ..sampleQueue.add(2);
 
         final runtime = LlamaCppRuntime(
+          modelPointer: 1,
           options: const LlamaRuntimeOptions(
             modelPath: 'model',
             libraryPath: '/tmp/libllama.so',
@@ -288,6 +262,7 @@ void main() {
             maxOutputTokensDefault: 4,
           ),
           client: client,
+          bindings: bindings,
         );
 
         await runtime
@@ -316,6 +291,7 @@ void main() {
         ..sampleQueue.add(2);
 
       final runtime = LlamaCppRuntime(
+        modelPointer: 1,
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
@@ -328,6 +304,7 @@ void main() {
           maxOutputTokensDefault: 4,
         ),
         client: client,
+        bindings: bindings,
       );
 
       await runtime
@@ -347,41 +324,34 @@ void main() {
 
       runtime.dispose();
       runtime.dispose();
-      expect(client.disposeCalls, 1);
+      // Dispose is idempotent - calling it twice doesn't throw.
+      // Runtime now only frees context, not the shared model.
     });
 
-    test('throws when context creation fails', () async {
+    test('throws when context creation fails', () {
       final bindings = FakeLlamaBindings();
       final client = FakeClient(bindings)
         ..tokenizeResult = [1]
         ..createContextResult = nullptr
         ..initialContext = nullptr;
 
-      final runtime = LlamaCppRuntime(
-        options: const LlamaRuntimeOptions(
-          modelPath: 'model',
-          libraryPath: '/tmp/libllama.so',
-          contextOptions: LlamaContextOptions(
-            contextSize: 32,
-            nBatch: 4,
-            nThreads: 1,
-            nThreadsBatch: 1,
-          ),
-          maxOutputTokensDefault: 4,
-        ),
-        client: client,
-      );
-
       expect(
-        () => runtime
-            .generate(
-              prompt: 'hi',
-              stopSequences: const [],
-              addBos: true,
-              requiresReset: false,
-              reusePrefixMessageCount: 0,
-            )
-            .toList(),
+        () => LlamaCppRuntime(
+          modelPointer: 1,
+          options: const LlamaRuntimeOptions(
+            modelPath: 'model',
+            libraryPath: '/tmp/libllama.so',
+            contextOptions: LlamaContextOptions(
+              contextSize: 32,
+              nBatch: 4,
+              nThreads: 1,
+              nThreadsBatch: 1,
+            ),
+            maxOutputTokensDefault: 4,
+          ),
+          client: client,
+          bindings: bindings,
+        ),
         throwsStateError,
       );
     });
@@ -411,6 +381,7 @@ void main() {
       final stopSequence = List.filled(100, 'x').join();
 
       final runtime = LlamaCppRuntime(
+        modelPointer: 1,
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
@@ -423,6 +394,7 @@ void main() {
           maxOutputTokensDefault: 16,
         ),
         client: client,
+        bindings: bindings,
       );
 
       final output = await runtime
@@ -447,6 +419,7 @@ void main() {
         ..sampleQueue.add(1);
 
       final runtime = LlamaCppRuntime(
+        modelPointer: 1,
         options: const LlamaRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
@@ -459,6 +432,7 @@ void main() {
           maxOutputTokensDefault: 1,
         ),
         client: client,
+        bindings: bindings,
       );
 
       final output = await runtime
@@ -495,6 +469,7 @@ final class FakeClient implements LlamaClientApi {
   LlamaHandles loadModel({
     required String modelPath,
     required LlamaModelOptions modelOptions,
+    ModelLoadProgressCallback? onProgress,
   }) {
     return LlamaHandles(
       bindings: bindings,

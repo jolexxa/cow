@@ -10,8 +10,11 @@ import 'package:cow_brain/src/context/context.dart';
 import 'package:cow_brain/src/core/core.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:cow_brain/src/tools/tools.dart';
+import 'package:ffi/ffi.dart';
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 import 'package:test/test.dart';
+
+import '../../fixtures/fake_bindings.dart';
 
 void main() {
   group('createAgentWithLlama', () {
@@ -40,7 +43,6 @@ void main() {
         temperature: 0.7,
         profile: LlamaProfiles.qwen3,
         safetyMarginTokens: 64,
-        maxSteps: 8,
       );
 
       final conversation = bundle.conversation..addUser('Find cow facts');
@@ -57,7 +59,7 @@ void main() {
       expect(conversation.messages.last.content, 'Done.');
     });
 
-    test('uses provided tools, conversation, and maxSteps', () {
+    test('uses provided tools and conversation', () {
       final runtime = ScriptedLlamaRuntime(const []);
       final tools = ToolRegistry();
       final convo = Conversation.initial();
@@ -71,12 +73,10 @@ void main() {
         temperature: 0.7,
         profile: LlamaProfiles.qwen3,
         safetyMarginTokens: 64,
-        maxSteps: 3,
       );
 
       expect(bundle.tools, same(tools));
       expect(bundle.conversation, same(convo));
-      expect(bundle.agent.maxSteps, 3);
     });
 
     test('accepts empty tools and a fresh conversation', () {
@@ -95,21 +95,26 @@ void main() {
     });
   });
 
-  group('createQwenAgent', () {
+  group('createAgent', () {
     test('throws when contextSize exceeds the runtime context size', () {
       expect(
-        () => createQwenAgent(
+        () => createAgent(
+          modelPointer: 1,
           runtimeOptions: _runtimeOptions,
           contextSize: 256,
           maxOutputTokens: 64,
           temperature: 0.7,
-          profile: LlamaProfiles.qwen3,
+          profileId: LlamaProfileId.qwen3,
           tools: ToolRegistry(),
           conversation: Conversation.initial(),
           safetyMarginTokens: 64,
-          maxSteps: 8,
-          runtimeFactory: (opts) =>
-              LlamaCppRuntime(options: opts, client: FakeLlamaClient()),
+          runtimeFactory: ({required int modelPointer, required options}) =>
+              LlamaCppRuntime(
+                modelPointer: modelPointer,
+                options: options,
+                client: FakeLlamaClient(),
+                bindings: _NoopBindings(),
+              ),
         ),
         throwsArgumentError,
       );
@@ -119,7 +124,7 @@ void main() {
       final tools = ToolRegistry();
       final convo = Conversation.initial();
 
-      final bundle = _createQwenAgent(
+      final bundle = _createAgent(
         tools: tools,
         conversation: convo,
       );
@@ -130,11 +135,78 @@ void main() {
     });
 
     test('creates a runtime via the provided factory', () {
-      final bundle = _createQwenAgent(
+      final bundle = _createAgent(
         tools: ToolRegistry(),
         conversation: Conversation.initial(),
       );
       expect(bundle.runtime, isA<LlamaCppRuntime>());
+    });
+
+    test('auto profileId falls back to qwen3 when no template', () {
+      final bindings = FakeLlamaBindings();
+      final bundle = createAgent(
+        modelPointer: 1,
+        runtimeOptions: _runtimeOptions,
+        profileId: LlamaProfileId.auto,
+        tools: ToolRegistry(),
+        conversation: Conversation.initial(),
+        contextSize: 128,
+        maxOutputTokens: 32,
+        temperature: 0.7,
+        safetyMarginTokens: 64,
+        runtimeFactory: ({required int modelPointer, required options}) =>
+            LlamaCppRuntime(
+              modelPointer: modelPointer,
+              options: options,
+              client: FakeLlamaClient(bindings: bindings),
+              bindings: bindings,
+            ),
+      );
+
+      // No chat template (nullptr) → falls back to qwen3.
+      expect(bundle.llm.profile.formatter, isA<Qwen3PromptFormatter>());
+      bundle.runtime.dispose();
+    });
+  });
+
+  group('detectProfileFromRuntime', () {
+    test('returns fallback when chat template is null', () {
+      final bindings = FakeLlamaBindings();
+      // Default chatTemplateResult is nullptr → chatTemplate returns null.
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: _runtimeOptions,
+        client: FakeLlamaClient(bindings: bindings),
+        bindings: bindings,
+      );
+
+      final profile = detectProfileFromRuntime(
+        runtime,
+        fallback: LlamaProfiles.qwen3,
+      );
+      expect(profile.formatter, isA<Qwen3PromptFormatter>());
+      runtime.dispose();
+    });
+
+    test('detects profile from chat template when present', () {
+      final bindings = FakeLlamaBindings()
+        ..chatTemplateResult = '<|im_start|>system\n{content}<|im_end|>'
+            .toNativeUtf8()
+            .cast<Char>();
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: _runtimeOptions,
+        client: FakeLlamaClient(bindings: bindings),
+        bindings: bindings,
+      );
+
+      final profile = detectProfileFromRuntime(
+        runtime,
+        fallback: LlamaProfiles.qwen25,
+      );
+      // Template contains <|im_start|> → detected as qwen3.
+      expect(profile.formatter, isA<Qwen3PromptFormatter>());
+      runtime.dispose();
     });
   });
 }
@@ -163,7 +235,6 @@ _createAgentWithLlama({
   required Conversation conversation,
   int contextSize = 64,
   int maxOutputTokens = 16,
-  int maxSteps = 8,
 }) {
   return createAgentWithLlama(
     runtime: runtime,
@@ -174,7 +245,6 @@ _createAgentWithLlama({
     temperature: 0.7,
     profile: LlamaProfiles.qwen3,
     safetyMarginTokens: 64,
-    maxSteps: maxSteps,
   );
 }
 
@@ -186,24 +256,30 @@ _createAgentWithLlama({
   ContextManager context,
   LlamaCppRuntime runtime,
 })
-_createQwenAgent({
+_createAgent({
   required ToolRegistry tools,
   required Conversation conversation,
   int contextSize = 128,
   int maxOutputTokens = 32,
+  LlamaProfileId profileId = LlamaProfileId.qwen3,
 }) {
-  return createQwenAgent(
+  return createAgent(
+    modelPointer: 1,
     runtimeOptions: _runtimeOptions,
     tools: tools,
     conversation: conversation,
-    profile: LlamaProfiles.qwen3,
+    profileId: profileId,
     contextSize: contextSize,
     maxOutputTokens: maxOutputTokens,
     temperature: 0.7,
     safetyMarginTokens: 64,
-    maxSteps: 8,
-    runtimeFactory: (opts) =>
-        LlamaCppRuntime(options: opts, client: FakeLlamaClient()),
+    runtimeFactory: ({required int modelPointer, required options}) =>
+        LlamaCppRuntime(
+          modelPointer: modelPointer,
+          options: options,
+          client: FakeLlamaClient(),
+          bindings: _NoopBindings(),
+        ),
   );
 }
 
@@ -240,13 +316,18 @@ final class ScriptedLlamaRuntime implements LlamaRuntime {
 }
 
 final class FakeLlamaClient implements LlamaClientApi {
+  FakeLlamaClient({LlamaBindings? bindings}) : _bindings = bindings;
+
+  final LlamaBindings? _bindings;
+
   @override
   LlamaHandles loadModel({
     required String modelPath,
     required LlamaModelOptions modelOptions,
+    ModelLoadProgressCallback? onProgress,
   }) {
     return LlamaHandles(
-      bindings: _NoopBindings(),
+      bindings: _bindings ?? _NoopBindings(),
       model: Pointer.fromAddress(1),
       context: Pointer.fromAddress(2),
       vocab: Pointer.fromAddress(3),
@@ -365,7 +446,7 @@ final class _NoopBindings implements LlamaBindings {
 
   @override
   Pointer<llama_vocab> llama_model_get_vocab(Pointer<llama_model> model) {
-    throw UnimplementedError();
+    return Pointer.fromAddress(3);
   }
 
   @override
@@ -509,6 +590,24 @@ final class _NoopBindings implements LlamaBindings {
 
   @override
   bool llama_vocab_is_eog(Pointer<llama_vocab> vocab, int token) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Pointer<Char> llama_model_chat_template(
+    Pointer<llama_model> model,
+    Pointer<Char> name,
+  ) {
+    throw UnimplementedError();
+  }
+
+  @override
+  int llama_model_meta_val_str(
+    Pointer<llama_model> model,
+    Pointer<Char> key,
+    Pointer<Char> buf,
+    int bufSize,
+  ) {
     throw UnimplementedError();
   }
 }

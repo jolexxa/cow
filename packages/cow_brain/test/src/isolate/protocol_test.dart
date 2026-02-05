@@ -23,6 +23,7 @@ void main() {
       const request = BrainRequest(
         type: BrainRequestType.init,
         init: InitRequest(
+          modelPointer: 1,
           runtimeOptions: _runtimeOptions,
           profile: LlamaProfileId.qwen3,
           tools: [
@@ -52,6 +53,7 @@ void main() {
       const request = BrainRequest(
         type: BrainRequestType.init,
         init: InitRequest(
+          modelPointer: 1,
           runtimeOptions: _runtimeOptions,
           profile: LlamaProfileId.qwen25,
           tools: <ToolDefinition>[],

@@ -1,11 +1,11 @@
 import 'dart:io';
 
-import 'package:cow_model_manager/src/cow_paths.dart';
-import 'package:cow_model_manager/src/model_specs.dart';
+import 'package:cow_model_manager/src/downloadable_model.dart';
+import 'package:path/path.dart' as p;
 
-bool profileFilesPresent(ModelProfileSpec profile, CowPaths paths) {
+bool profileFilesPresent(DownloadableModel profile, String modelsDir) {
   for (final file in profile.files) {
-    final path = paths.modelFilePath(profile, file);
+    final path = p.join(modelsDir, profile.id, file.fileName);
     if (!File(path).existsSync()) {
       return false;
     }
@@ -13,9 +13,9 @@ bool profileFilesPresent(ModelProfileSpec profile, CowPaths paths) {
   return true;
 }
 
-bool profilesPresent(Iterable<ModelProfileSpec> profiles, CowPaths paths) {
+bool profilesPresent(Iterable<DownloadableModel> profiles, String modelsDir) {
   for (final profile in profiles) {
-    if (!profileFilesPresent(profile, paths)) {
+    if (!profileFilesPresent(profile, modelsDir)) {
       return false;
     }
   }
