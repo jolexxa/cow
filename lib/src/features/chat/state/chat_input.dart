@@ -1,3 +1,4 @@
+import 'package:cow/src/features/chat/state/models/brain_role.dart';
 import 'package:cow/src/features/chat/state/models/chat_message.dart';
 import 'package:cow_brain/cow_brain.dart';
 
@@ -89,4 +90,41 @@ final class ToggleReasoning extends ChatInput {
 /// Dispose the session and clean up resources.
 final class Dispose extends ChatInput {
   const Dispose();
+}
+
+/// Model loading progress update.
+final class ModelLoadProgressUpdate extends ChatInput {
+  const ModelLoadProgressUpdate({
+    required this.currentModel,
+    required this.totalModels,
+    required this.progress,
+    required this.modelName,
+  });
+
+  final int currentModel;
+  final int totalModels;
+  final double progress;
+  final String modelName;
+}
+
+/// A model has finished loading.
+final class ModelLoaded extends ChatInput {
+  const ModelLoaded({required this.role, required this.model});
+
+  final BrainRole role;
+  final LoadedModel model;
+}
+
+/// Set the total number of models to load.
+final class SetTotalModels extends ChatInput {
+  const SetTotalModels(this.count);
+
+  final int count;
+}
+
+/// Brains have been initialized and are ready.
+final class BrainsInitialized extends ChatInput {
+  const BrainsInitialized({required this.settings});
+
+  final AgentSettings settings;
 }

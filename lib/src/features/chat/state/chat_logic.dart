@@ -5,6 +5,7 @@ import 'package:cow/src/features/chat/state/chat_output.dart';
 import 'package:cow/src/features/chat/state/models/chat_context_stats.dart';
 import 'package:cow/src/features/chat/state/models/chat_message.dart';
 import 'package:cow/src/features/chat/state/models/chat_phase.dart';
+import 'package:cow/src/features/chat/state/models/model_load_progress.dart';
 import 'package:cow_brain/cow_brain.dart';
 import 'package:logic_blocks/logic_blocks.dart';
 
@@ -76,8 +77,41 @@ final class UninitializedState extends ChatState {
 
 final class InitializingState extends ChatState {
   InitializingState() {
-    on<ModelsLoaded>((input) {
+    on<SetTotalModels>((input) {
+      data.totalModelsToLoad = input.count;
+      return toSelf();
+    });
+
+    on<ModelLoadProgressUpdate>((input) {
+      data.modelLoadProgress = ModelLoadProgress(
+        currentModelIndex: input.currentModel,
+        totalModels: input.totalModels,
+        currentProgress: input.progress,
+        currentModelName: input.modelName,
+      );
+      output(const StateUpdated());
+      return toSelf();
+    });
+
+    on<ModelLoaded>((input) {
+      data.loadedModels[input.role] = input.model;
+
+      // When all models loaded, request brain initialization.
+      if (data.loadedModels.length == data.totalModelsToLoad) {
+        output(
+          InitializeBrainsRequested(
+            models: Map.of(data.loadedModels),
+            enableReasoning: data.enableReasoning,
+          ),
+        );
+      }
+      return toSelf();
+    });
+
+    on<BrainsInitialized>((input) {
       data
+        ..modelLoadProgress = null
+        ..loadedModels = {}
         ..agentSettings = input.settings
         ..messages.add(
           ChatMessage.alert('Model ready. Type a message to begin.'),
@@ -94,7 +128,7 @@ final class InitializingState extends ChatState {
   }
 
   @override
-  List<ChatMessage> get messages => [ChatMessage.alert('Loading model...')];
+  List<ChatMessage> get messages => const [];
 
   @override
   bool get loading => true;

@@ -6,6 +6,7 @@ import 'package:cow/src/features/chat/state/chat_data.dart';
 import 'package:cow/src/features/chat/state/chat_input.dart';
 import 'package:cow/src/features/chat/state/chat_logic.dart';
 import 'package:cow/src/features/chat/state/chat_output.dart';
+import 'package:cow/src/features/chat/state/models/brain_role.dart';
 import 'package:cow/src/features/chat/state/models/chat_message.dart';
 import 'package:cow/src/features/chat/state/summary/summary_brain.dart';
 import 'package:cow/src/features/chat/state/summary/summary_input.dart';
@@ -37,7 +38,10 @@ class ChatCubit extends LogicBloc<ChatState> {
     binding
       ..onOutput<StateUpdated>((_) => emit(state))
       ..onOutput<LoadModelsRequested>(
-        (output) => unawaited(_loadModels(output.enableReasoning)),
+        (output) => unawaited(_loadModels()),
+      )
+      ..onOutput<InitializeBrainsRequested>(
+        (output) => unawaited(_initializeBrains(output)),
       )
       ..onOutput<StartTurnRequested>(
         (output) =>
@@ -127,20 +131,57 @@ class ChatCubit extends LogicBloc<ChatState> {
     return super.close();
   }
 
-  Future<void> _loadModels(bool enableReasoning) async {
+  Future<void> _loadModels() async {
     try {
-      // Load both models in parallel via ModelServer.
-      final results = await Future.wait([
-        _brains.loadModel(modelPath: llamaRuntimeOptions.modelPath),
-        _brains.loadModel(modelPath: summaryRuntimeOptions.modelPath),
-      ]);
-      final primaryModel = results[0];
-      final summaryModel = results[1];
+      final modelConfigs = [
+        (
+          BrainRole.primary,
+          llamaRuntimeOptions.modelPath,
+          modelProfile.downloadableModel.id,
+        ),
+        (
+          BrainRole.summary,
+          summaryRuntimeOptions.modelPath,
+          summaryModelProfile.downloadableModel.id,
+        ),
+      ];
 
+      // Tell logic block how many models we're loading.
+      input(SetTotalModels(modelConfigs.length));
+
+      for (var i = 0; i < modelConfigs.length; i++) {
+        final (role, path, name) = modelConfigs[i];
+        final model = await _brains.loadModel(
+          modelPath: path,
+          onProgress: (progress) {
+            input(
+              ModelLoadProgressUpdate(
+                currentModel: i + 1,
+                totalModels: modelConfigs.length,
+                progress: progress,
+                modelName: name,
+              ),
+            );
+            return true;
+          },
+        );
+        input(ModelLoaded(role: role, model: model));
+      }
+      // Logic block will output InitializeBrainsRequested when all loaded.
+    } on Object catch (e) {
+      input(ModelsLoadFailed(e.toString()));
+    }
+  }
+
+  Future<void> _initializeBrains(InitializeBrainsRequested request) async {
+    try {
       const agentSettings = AgentSettings(
         safetyMarginTokens: 64,
         maxSteps: 8,
       );
+
+      final primaryModel = request.models[BrainRole.primary]!;
+      final summaryModel = request.models[BrainRole.summary]!;
 
       await _primaryBrain.init(
         modelPointer: primaryModel.modelPointer,
@@ -148,7 +189,7 @@ class ChatCubit extends LogicBloc<ChatState> {
         profile: modelProfile.modelFamily,
         tools: toolRegistry.definitions,
         settings: agentSettings,
-        enableReasoning: enableReasoning,
+        enableReasoning: request.enableReasoning,
       );
 
       await _summaryBrain.init(
@@ -157,7 +198,7 @@ class ChatCubit extends LogicBloc<ChatState> {
         profile: summaryModelProfile.modelFamily,
       );
 
-      input(const ModelsLoaded(settings: agentSettings));
+      input(const BrainsInitialized(settings: agentSettings));
     } on Object catch (e) {
       input(ModelsLoadFailed(e.toString()));
     }

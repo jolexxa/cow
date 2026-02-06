@@ -163,6 +163,48 @@ class _ChatPageState extends State<ChatPage> {
     required TuiThemeData theme,
     required ChatState state,
   }) {
+    // Handle loading state with progress bar.
+    if (state is InitializingState) {
+      final progress = state.data.modelLoadProgress;
+      if (progress != null) {
+        return Container(
+          color: theme.background,
+          child: Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 1),
+              child: ListView.builder(
+                controller: _scrollController,
+                itemCount: 1,
+                itemBuilder: (context, index) =>
+                    LoadingProgressItem(progress: progress),
+              ),
+            ),
+          ),
+        );
+      }
+      // Fallback if no progress yet.
+      return Container(
+        color: theme.background,
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          child: Padding(
+            padding: const EdgeInsets.only(right: 1),
+            child: ListView.builder(
+              controller: _scrollController,
+              itemCount: 1,
+              itemBuilder: (context, index) => MessageItem(
+                message: ChatMessage.alert('Loading models...'),
+                showSpinner: true,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     final visibleMessages = state.visibleMessages;
     final lastAssistantIndex = visibleMessages.lastIndexWhere(
       (message) => message.sender == 'Cow' && !message.isSystem,

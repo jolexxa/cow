@@ -1,5 +1,4 @@
-import 'dart:async';
-
+import 'package:cow/src/features/chat/components/message_item_layout.dart';
 import 'package:cow/src/features/chat/state/models/chat_message.dart';
 import 'package:nocterm/nocterm.dart';
 
@@ -15,8 +14,6 @@ class MessageItem extends StatelessComponent {
   final bool showSpinner;
   final bool showSender;
 
-  static const int _senderWidth = 7;
-
   @override
   Component build(BuildContext context) {
     final theme = TuiTheme.of(context);
@@ -28,8 +25,6 @@ class MessageItem extends StatelessComponent {
       ChatMessageKind.user => Colors.brightGreen,
       ChatMessageKind.assistant => Colors.brightBlue,
     };
-
-    final senderLabel = message.sender.padLeft(_senderWidth);
 
     final messageColor = switch (message.kind) {
       ChatMessageKind.system => Colors.brightRed,
@@ -47,82 +42,27 @@ class MessageItem extends StatelessComponent {
       ChatMessageKind.assistant => theme.onSecondary,
     };
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(width: 1),
-        if (showSpinner)
-          const InlineSpinner()
-        else
-          Text(' ', style: TextStyle(color: theme.secondary)),
-        const SizedBox(width: 1),
-        if (showSender) ...[
-          Text(
-            '$senderLabel:',
-            style: TextStyle(color: senderColor, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(width: 1),
-        ],
-        Expanded(
-          child: Row(
-            children: [
-              Expanded(
-                child: MarkdownText(
-                  message.text,
-                  styleSheet: MarkdownStyleSheet(
-                    paragraphStyle: TextStyle(color: messageColor),
-                    boldStyle: TextStyle(
-                      color: messageColorAccent,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+    return MessageItemLayout(
+      senderLabel: message.sender,
+      senderColor: senderColor,
+      showSpinner: showSpinner,
+      showSender: showSender,
+      content: Row(
+        children: [
+          Expanded(
+            child: MarkdownText(
+              message.text,
+              styleSheet: MarkdownStyleSheet(
+                paragraphStyle: TextStyle(color: messageColor),
+                boldStyle: TextStyle(
+                  color: messageColorAccent,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-            ],
+            ),
           ),
-        ),
-      ],
-    );
-  }
-}
-
-class InlineSpinner extends StatefulComponent {
-  const InlineSpinner({super.key});
-
-  @override
-  State<InlineSpinner> createState() => _InlineSpinnerState();
-}
-
-class _InlineSpinnerState extends State<InlineSpinner> {
-  static const List<String> _frames = <String>['|', '/', '-', r'\'];
-  static const Duration _interval = Duration(milliseconds: 120);
-
-  Timer? _timer;
-  var _index = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(_interval, (_) {
-      if (!mounted) return;
-      setState(() {
-        _index = (_index + 1) % _frames.length;
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Component build(BuildContext context) {
-    final theme = TuiTheme.of(context);
-    return Text(
-      _frames[_index],
-      style: TextStyle(color: theme.secondary),
+        ],
+      ),
     );
   }
 }
