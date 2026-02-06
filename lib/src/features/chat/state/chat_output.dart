@@ -1,4 +1,5 @@
 import 'package:cow/src/features/chat/state/active_turn.dart';
+import 'package:cow/src/features/chat/state/models/brain_role.dart';
 import 'package:cow_brain/cow_brain.dart';
 
 /// Outputs produced by the chat session state machine.
@@ -83,4 +84,15 @@ final class StartSummaryTurnRequested extends ChatOutput {
   const StartSummaryTurnRequested({required this.responseId});
 
   final int responseId;
+}
+
+/// Request the adapter to initialize brains after models are loaded.
+final class InitializeBrainsRequested extends ChatOutput {
+  const InitializeBrainsRequested({
+    required this.models,
+    required this.enableReasoning,
+  });
+
+  final Map<BrainRole, LoadedModel> models;
+  final bool enableReasoning;
 }

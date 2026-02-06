@@ -103,13 +103,16 @@ class ModelServer {
     );
     _models[response.modelPath] = model;
 
+    // Guarantee 100% callback at end.
+    final callback = _progressCallbacks.remove(response.modelPath);
+    callback?.call(1);
+
     final completers = _pendingLoads.remove(response.modelPath);
     if (completers != null) {
       for (final completer in completers) {
         completer.complete(model);
       }
     }
-    _progressCallbacks.remove(response.modelPath);
   }
 
   void _handleModelUnloaded(ModelUnloadedResponse response) {
@@ -162,6 +165,9 @@ class ModelServer {
     final completer = Completer<LoadedModel>();
     _pendingLoads[modelPath] = [completer];
     _progressCallbacks[modelPath] = onProgress;
+
+    // Guarantee 0% callback at start.
+    onProgress?.call(0);
 
     _sendPort.send(
       LoadModelRequest(

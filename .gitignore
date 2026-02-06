@@ -20,3 +20,6 @@ coverage/
 
 # FVM Version Cache
 .fvm/
+
+# External packages reference
+external/
