@@ -58,27 +58,24 @@ void _redirectNativeStderr(OSPlatform platform, {required bool debug}) {
 
   final String target;
   final int flags;
-  if (debug) {
-    target = 'cow_native.log';
-    flags =
-        platform.openFlagWriteOnly |
-        platform.openFlagCreate |
-        platform.openFlagTrunc;
-  } else {
-    target = '/dev/null';
-    flags =
-        platform.openFlagWriteOnly |
-        platform.openFlagCreate |
-        platform.openFlagAppend;
-  }
+
+  target = debug ? 'cow_native.log' : '/dev/null';
+
+  flags =
+      platform.openFlagWriteOnly |
+      platform.openFlagCreate |
+      platform.openFlagTrunc;
 
   const mode = 0x1A4; // 0644
   final targetPtr = target.toNativeUtf8();
   final fd = open(targetPtr, flags, mode);
+
   calloc.free(targetPtr);
+
   if (fd < 0) {
     return;
   }
+
   dup2(fd, 2);
   close(fd);
 }
