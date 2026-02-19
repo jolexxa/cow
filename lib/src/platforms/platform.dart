@@ -2,6 +2,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
+import 'package:mlx_dart/mlx_dart.dart';
 import 'package:nocterm/nocterm.dart';
 import 'package:path/path.dart' as p;
 
@@ -62,6 +63,11 @@ sealed class OSPlatform {
   }
 
   String _devAssetPath();
+
+  /// Resolves the MLX library path.
+  ///
+  /// Returns null on platforms where MLX is not available (e.g. Linux).
+  String? resolveMlxLibraryPath() => null;
 }
 
 class MacOS extends OSPlatform {
@@ -104,6 +110,72 @@ class MacOS extends OSPlatform {
       'arm64',
       'libllama.0.dylib',
     );
+  }
+
+  @override
+  String? resolveMlxLibraryPath() {
+    if (Abi.current() != Abi.macosArm64) return null;
+
+    final executableDir = File(Platform.resolvedExecutable).parent;
+    final bundledPath = MlxDart.resolveLibraryPath(
+      executableDir: executableDir,
+    );
+    if (File(bundledPath).existsSync()) {
+      return bundledPath;
+    }
+
+    // During `dart run`, fall back to dev paths relative to the script.
+    final scriptDir = File.fromUri(Platform.script).parent;
+    final repoRoot = scriptDir.parent;
+    final devPaths = [
+      // Prebuilt assets.
+      p.join(
+        repoRoot.path,
+        'packages',
+        'mlx_dart',
+        'assets',
+        'native',
+        'macos',
+        'arm64',
+        'libCowMLX.dylib',
+      ),
+      // cow_mlx xcodebuild output (required for Metal shaders).
+      p.join(
+        repoRoot.path,
+        'packages',
+        'cow_mlx',
+        '.build',
+        'xcode',
+        'Build',
+        'Products',
+        'Release',
+        'libCowMLX.dylib',
+      ),
+      // cow_mlx SwiftPM release build output.
+      p.join(
+        repoRoot.path,
+        'packages',
+        'cow_mlx',
+        '.build',
+        'release',
+        'libCowMLX.dylib',
+      ),
+      // cow_mlx SwiftPM debug build output.
+      p.join(
+        repoRoot.path,
+        'packages',
+        'cow_mlx',
+        '.build',
+        'debug',
+        'libCowMLX.dylib',
+      ),
+    ];
+    for (final devPath in devPaths) {
+      if (File(devPath).existsSync()) {
+        return devPath;
+      }
+    }
+    return null;
   }
 }
 

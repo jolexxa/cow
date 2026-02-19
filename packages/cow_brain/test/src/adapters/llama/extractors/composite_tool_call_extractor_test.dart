@@ -1,4 +1,5 @@
-import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/extractors/composite_tool_call_extractor.dart';
+import 'package:cow_brain/src/adapters/tool_call_extractor.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:test/test.dart';
 

@@ -3,7 +3,7 @@
 
 import 'dart:convert';
 
-import 'package:cow_brain/src/adapters/llama/tool_call_extractor.dart';
+import 'package:cow_brain/src/adapters/tool_call_extractor.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:cow_brain/src/utils/json_brace_utils.dart' as json_utils;
 

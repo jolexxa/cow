@@ -1,4 +1,4 @@
-import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/qwen3_prompt_formatter.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:test/test.dart';
 

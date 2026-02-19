@@ -323,7 +323,7 @@ final class LlamaSamplerChain {
 
   factory LlamaSamplerChain.build(
     LlamaBindings bindings,
-    LlamaSamplingOptions options,
+    SamplingOptions options,
   ) {
     final b = bindings;
     final chainParams = b.llama_sampler_chain_default_params();

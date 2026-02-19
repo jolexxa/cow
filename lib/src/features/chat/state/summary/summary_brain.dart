@@ -51,13 +51,13 @@ final class SummaryBrain {
 
   /// Initializes the brain with the given runtime options and profile.
   Future<void> init({
-    required int modelPointer,
-    required LlamaRuntimeOptions runtimeOptions,
-    required LlamaProfileId profile,
+    required int modelHandle,
+    required BackendRuntimeOptions options,
+    required ModelProfileId profile,
   }) async {
     await _brain.init(
-      modelPointer: modelPointer,
-      runtimeOptions: runtimeOptions,
+      modelHandle: modelHandle,
+      options: options,
       profile: profile,
       tools: const [],
       settings: _settings,

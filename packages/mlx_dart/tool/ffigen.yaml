@@ -1,0 +1,25 @@
+name: CowMlxBindings
+description: Bindings for CowMLX (MLX Swift inference).
+output: ../lib/src/bindings/cow_mlx_bindings.dart
+headers:
+  entry-points:
+    - ../../cow_mlx/Sources/CowMLX/include/cow_mlx.h
+silence-enum-warning: true
+exclude-all-by-default: true
+functions:
+  include:
+    - cow_mlx_.*
+typedefs:
+  include:
+    - cow_mlx_.*
+macros:
+  include:
+    - COW_MLX_.*
+preamble: |
+  // ignore_for_file: non_constant_identifier_names
+  // ignore_for_file: camel_case_types
+  // ignore_for_file: public_member_api_docs
+  // ignore_for_file: constant_identifier_names
+  // ignore_for_file: unused_element
+  // ignore_for_file: unused_field
+  // ignore_for_file: unused_import

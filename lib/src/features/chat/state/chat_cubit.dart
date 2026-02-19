@@ -20,9 +20,9 @@ class ChatCubit extends LogicBloc<ChatState> {
   ChatCubit({
     required ChatLogic logic,
     required this.toolRegistry,
-    required this.llamaRuntimeOptions,
+    required this.primaryOptions,
     required this.modelProfile,
-    required this.summaryRuntimeOptions,
+    required this.summaryOptions,
     required this.summaryModelProfile,
     required CowBrains<String> brains,
     required CowBrain primaryBrain,
@@ -87,9 +87,9 @@ class ChatCubit extends LogicBloc<ChatState> {
   static const String lightweightBrainKey = 'lightweight';
 
   final ToolRegistry toolRegistry;
-  final LlamaRuntimeOptions llamaRuntimeOptions;
+  final BackendRuntimeOptions primaryOptions;
   final AppModelProfile modelProfile;
-  final LlamaRuntimeOptions summaryRuntimeOptions;
+  final BackendRuntimeOptions summaryOptions;
   final AppModelProfile summaryModelProfile;
 
   final CowBrains<String> _brains;
@@ -136,13 +136,17 @@ class ChatCubit extends LogicBloc<ChatState> {
       final modelConfigs = [
         (
           BrainRole.primary,
-          llamaRuntimeOptions.modelPath,
+          primaryOptions.modelPath,
           modelProfile.downloadableModel.id,
+          primaryOptions.backend,
+          primaryOptions.libraryPath,
         ),
         (
           BrainRole.summary,
-          summaryRuntimeOptions.modelPath,
+          summaryOptions.modelPath,
           summaryModelProfile.downloadableModel.id,
+          summaryOptions.backend,
+          summaryOptions.libraryPath,
         ),
       ];
 
@@ -150,9 +154,11 @@ class ChatCubit extends LogicBloc<ChatState> {
       input(SetTotalModels(modelConfigs.length));
 
       for (var i = 0; i < modelConfigs.length; i++) {
-        final (role, path, name) = modelConfigs[i];
+        final (role, path, name, backend, mlxLibPath) = modelConfigs[i];
         final model = await _brains.loadModel(
           modelPath: path,
+          backend: backend,
+          libraryPathOverride: mlxLibPath,
           onProgress: (progress) {
             input(
               ModelLoadProgressUpdate(
@@ -184,8 +190,8 @@ class ChatCubit extends LogicBloc<ChatState> {
       final summaryModel = request.models[BrainRole.summary]!;
 
       await _primaryBrain.init(
-        modelPointer: primaryModel.modelPointer,
-        runtimeOptions: llamaRuntimeOptions,
+        modelHandle: primaryModel.modelPointer,
+        options: primaryOptions,
         profile: modelProfile.modelFamily,
         tools: toolRegistry.definitions,
         settings: agentSettings,
@@ -193,8 +199,8 @@ class ChatCubit extends LogicBloc<ChatState> {
       );
 
       await _summaryBrain.init(
-        modelPointer: summaryModel.modelPointer,
-        runtimeOptions: summaryRuntimeOptions,
+        modelHandle: summaryModel.modelPointer,
+        options: summaryOptions,
         profile: summaryModelProfile.modelFamily,
       );
 

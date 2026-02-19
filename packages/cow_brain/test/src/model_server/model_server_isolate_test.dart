@@ -7,12 +7,15 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/mlx/mlx_bindings.dart';
+import 'package:cow_brain/src/adapters/mlx/mlx_client.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:cow_brain/src/model_server/model_server.dart';
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 import 'package:test/test.dart';
 
 import '../../fixtures/fake_bindings.dart';
+import '../../fixtures/fake_mlx_bindings.dart';
 
 void main() {
   group('ModelServerIsolateTestHarness', () {
@@ -293,6 +296,128 @@ void main() {
 
       final responses = await collectResponses(2);
       expect(responses.whereType<ModelLoadedResponse>(), hasLength(1));
+    });
+  });
+
+  group('ModelServerIsolateTestHarness MLX', () {
+    late ReceivePort receivePort;
+    late StreamController<Map<String, Object?>> responseController;
+    late FakeMlxBindings mlxBindings;
+
+    setUp(() {
+      receivePort = ReceivePort();
+      responseController = StreamController<Map<String, Object?>>.broadcast();
+
+      receivePort.listen((message) {
+        if (message is Map) {
+          responseController.add(Map<String, Object?>.from(message));
+        }
+      });
+
+      mlxBindings = FakeMlxBindings(
+        loadModelResult: 5,
+        modelFromIdResult: 5,
+      );
+
+      MlxClient.openBindings = ({required String libraryPath}) => mlxBindings;
+    });
+
+    tearDown(() async {
+      receivePort.close();
+      await responseController.close();
+      MlxClient.openBindings = MlxBindingsLoader.open;
+    });
+
+    Future<ModelServerResponse> expectResponse() async {
+      final json = await responseController.stream.first;
+      return ModelServerResponse.fromJson(json);
+    }
+
+    Future<List<ModelServerResponse>> collectResponses(int count) async {
+      return responseController.stream
+          .take(count)
+          .map(ModelServerResponse.fromJson)
+          .toList();
+    }
+
+    test(
+      'load_model with MLX backend sends progress and ModelLoadedResponse',
+      () async {
+        mlxBindings.invokeProgressCallback = true;
+        final harness = ModelServerIsolateTestHarness(receivePort.sendPort);
+
+        harness.handleMessage(
+          const LoadModelRequest(
+            modelPath: '/models/test.mlx',
+            libraryPath: '/lib/libmlx.dylib',
+            backend: InferenceBackend.mlx,
+          ).toJson(),
+        );
+
+        final responses = await collectResponses(2);
+        final progress = responses.whereType<LoadProgressResponse>().toList();
+        expect(progress, hasLength(1));
+        expect(progress.first.progress, 0.5);
+
+        final loaded = responses.whereType<ModelLoadedResponse>().first;
+        expect(loaded.modelPath, '/models/test.mlx');
+        expect(loaded.modelPointer, 42);
+      },
+    );
+
+    test(
+      'load_model MLX returns cached entry on second load',
+      () async {
+        final harness = ModelServerIsolateTestHarness(receivePort.sendPort);
+
+        harness.handleMessage(
+          const LoadModelRequest(
+            modelPath: '/models/test.mlx',
+            libraryPath: '/lib/libmlx.dylib',
+            backend: InferenceBackend.mlx,
+          ).toJson(),
+        );
+        await expectResponse(); // first load
+
+        final loadCallsAfterFirst = mlxBindings.loadModelCalls;
+
+        harness.handleMessage(
+          const LoadModelRequest(
+            modelPath: '/models/test.mlx',
+            libraryPath: '/lib/libmlx.dylib',
+            backend: InferenceBackend.mlx,
+          ).toJson(),
+        );
+
+        final response = await expectResponse();
+        expect(mlxBindings.loadModelCalls, loadCallsAfterFirst); // No new call.
+
+        final loaded = response as ModelLoadedResponse;
+        expect(loaded.modelPointer, 42);
+      },
+    );
+
+    test('unload_model MLX disposes via MlxState', () async {
+      final harness = ModelServerIsolateTestHarness(receivePort.sendPort);
+
+      // Load.
+      harness.handleMessage(
+        const LoadModelRequest(
+          modelPath: '/models/test.mlx',
+          libraryPath: '/lib/libmlx.dylib',
+          backend: InferenceBackend.mlx,
+        ).toJson(),
+      );
+      await expectResponse();
+
+      // Unload — should dispose MlxState.
+      harness.handleMessage(
+        const UnloadModelRequest(modelPath: '/models/test.mlx').toJson(),
+      );
+      await expectResponse();
+
+      // Verify freeModel was called (dispose path).
+      expect(mlxBindings.freeModelCalls, 1);
     });
   });
 

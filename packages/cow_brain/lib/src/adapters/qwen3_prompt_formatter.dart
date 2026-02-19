@@ -3,7 +3,7 @@
 
 import 'dart:convert';
 
-import 'package:cow_brain/src/adapters/llama/llama_prompt_formatter.dart';
+import 'package:cow_brain/src/adapters/prompt_formatter.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 
 /*
@@ -99,7 +99,7 @@ import 'package:cow_brain/src/isolate/models.dart';
 /// Qwen 3 chat template (listed above in this file) with support for tools
 /// and reasoning.
 /// <https://huggingface.co/Qwen/Qwen3-8B-GGUF?chat_template=default>
-final class Qwen3PromptFormatter implements LlamaPromptFormatter {
+final class Qwen3PromptFormatter implements PromptFormatter {
   const Qwen3PromptFormatter();
 
   @override

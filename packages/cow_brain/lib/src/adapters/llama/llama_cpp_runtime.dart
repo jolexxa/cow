@@ -1,31 +1,32 @@
 // This is the native llama.cpp runtime; docs can be expanded later.
 // Plain string composition keeps the streaming logic straightforward.
-// ignore_for_file: public_member_api_docs, use_string_buffers
+// ignore_for_file: public_member_api_docs
 
 import 'dart:convert';
 import 'dart:ffi';
 
-import 'package:cow_brain/src/adapters/llama/llama_adapter.dart';
+import 'package:cow_brain/src/adapters/inference_adapter.dart';
 import 'package:cow_brain/src/adapters/llama/llama_bindings.dart';
 import 'package:cow_brain/src/adapters/llama/llama_client.dart';
 import 'package:cow_brain/src/adapters/llama/llama_handles.dart';
 import 'package:cow_brain/src/adapters/llama/llama_model_metadata.dart';
-import 'package:cow_brain/src/adapters/llama/llama_stream_chunk.dart';
+import 'package:cow_brain/src/adapters/stream_assembler.dart';
+import 'package:cow_brain/src/adapters/stream_chunk.dart';
 import 'package:cow_brain/src/isolate/brain_isolate.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 
-/// Native llama.cpp runtime that powers the [LlamaAdapter].
+/// Native llama.cpp runtime that powers the [InferenceAdapter].
 ///
 /// Requires a preloaded model pointer from a model server isolate.
 /// The runtime creates its own context but never loads models itself.
-final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
+final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
   /// Creates a runtime with a shared model pointer from another isolate.
   ///
   /// [modelPointer] is the address of a `llama_model*` loaded by ModelServer.
   /// [options] provides context/sampling configuration and library path.
   LlamaCppRuntime({
     required int modelPointer,
-    required LlamaRuntimeOptions options,
+    required LlamaCppRuntimeOptions options,
     required LlamaClientApi client,
     required LlamaBindings bindings,
   }) : _options = options,
@@ -40,9 +41,7 @@ final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
     }
   }
 
-  static const _yieldBoundarySteps = 16;
-
-  final LlamaRuntimeOptions _options;
+  final LlamaCppRuntimeOptions _options;
   final LlamaClientApi _client;
   late final LlamaHandles _handles;
 
@@ -73,7 +72,7 @@ final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
   }
 
   @override
-  Stream<LlamaStreamChunk> generate({
+  Stream<StreamChunk> generate({
     required String prompt,
     required List<String> stopSequences,
     required bool addBos,
@@ -101,7 +100,7 @@ final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
     _decodeTokens(promptTokens);
 
     final temperature = _options.samplingOptions.temperature ?? 0.7;
-    final samplingOptions = LlamaSamplingOptions(
+    final samplingOptions = SamplingOptions(
       seed: _options.samplingOptions.seed,
       topK: _options.samplingOptions.topK,
       topP: _options.samplingOptions.topP,
@@ -112,12 +111,8 @@ final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
       penaltyLastN: _options.samplingOptions.penaltyLastN,
     );
     final sampler = LlamaSamplerChain.build(_handles.bindings, samplingOptions);
+    final assembler = StreamAssembler(stopSequences: stopSequences);
 
-    final maxStopLength = _maxStopSequenceLength(stopSequences);
-    final guardLength = maxStopLength > 0 ? maxStopLength - 1 : 0;
-    var pending = '';
-    var stepsSinceYield = 0;
-    var tokenCountDelta = 0;
     final decodedChunks = <String>[];
     final chunkSink = StringConversionSink.fromStringSink(
       _ChunkedStringSink(decodedChunks),
@@ -133,95 +128,63 @@ final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
         if (b.llama_vocab_is_eog(_handles.vocab, token)) {
           break;
         }
-        tokenCountDelta += 1;
 
         _client.decode(_handles, _handles.context, <int>[token]);
 
         if (b.llama_vocab_is_control(_handles.vocab, token)) {
+          final chunk = assembler.addEmptyToken();
+          if (chunk != null) {
+            yield chunk;
+            await _asyncBoundary();
+          }
           continue;
         }
         final bytes = _client.tokenToBytes(_handles, token);
         if (bytes.isEmpty) {
+          final chunk = assembler.addEmptyToken();
+          if (chunk != null) {
+            yield chunk;
+            await _asyncBoundary();
+          }
           continue;
         }
         byteSink.add(bytes);
         if (decodedChunks.isEmpty) {
+          final chunk = assembler.addEmptyToken(); // coverage:ignore-line
+          if (chunk != null) {
+            yield chunk; // coverage:ignore-line
+            await _asyncBoundary(); // coverage:ignore-line
+          }
           continue;
         }
         final piece = _drainDecodedChunks(decodedChunks);
         if (piece.isEmpty) {
+          final chunk = assembler.addEmptyToken();
+          if (chunk != null) {
+            yield chunk; // coverage:ignore-line
+            await _asyncBoundary(); // coverage:ignore-line
+          }
           continue;
         }
-        pending += piece;
 
-        final stopIndex = _earliestStopIndex(pending, stopSequences);
-        if (stopIndex != null) {
-          final visible = pending.substring(0, stopIndex);
-          if (visible.isNotEmpty) {
-            yield LlamaStreamChunk(
-              text: visible,
-              tokenCountDelta: tokenCountDelta,
-            );
-            tokenCountDelta = 0;
-            await _asyncBoundary();
-          }
-          pending = '';
-          break;
-        }
-
-        final flushLength = pending.length - guardLength;
-        if (flushLength > 0) {
-          final visible = pending.substring(0, flushLength);
-          pending = pending.substring(flushLength);
-          if (visible.isNotEmpty) {
-            yield LlamaStreamChunk(
-              text: visible,
-              tokenCountDelta: tokenCountDelta,
-            );
-            tokenCountDelta = 0;
-            stepsSinceYield = 0;
-            await _asyncBoundary();
-            continue;
-          }
-        }
-
-        stepsSinceYield += 1;
-        if (stepsSinceYield >= _yieldBoundarySteps) {
-          stepsSinceYield = 0;
-          if (tokenCountDelta > 0) {
-            yield LlamaStreamChunk(
-              text: '',
-              tokenCountDelta: tokenCountDelta,
-            );
-            tokenCountDelta = 0;
-          }
+        final chunk = assembler.addText(piece);
+        if (chunk != null) {
+          yield chunk;
           await _asyncBoundary();
         }
+        if (assembler.stopped) break;
       }
     } finally {
       byteSink.close();
       if (decodedChunks.isNotEmpty) {
-        pending += _drainDecodedChunks(decodedChunks);
+        assembler.appendPending(_drainDecodedChunks(decodedChunks));
       }
       sampler.dispose();
     }
 
-    if (pending.isNotEmpty) {
-      final stopIndex = _earliestStopIndex(pending, stopSequences);
-      final visible = stopIndex == null
-          ? pending
-          : pending.substring(0, stopIndex);
-      if (visible.isNotEmpty) {
-        yield LlamaStreamChunk(
-          text: visible,
-          tokenCountDelta: tokenCountDelta,
-        );
-        tokenCountDelta = 0;
-        await _asyncBoundary();
-      }
-    }
-    if (tokenCountDelta > 0) {
-      yield LlamaStreamChunk(text: '', tokenCountDelta: tokenCountDelta);
+    for (final chunk in assembler.flush()) {
+      yield chunk;
+      await _asyncBoundary();
     }
   }
 
@@ -302,33 +265,6 @@ final class LlamaCppRuntime implements LlamaRuntime, BrainRuntime {
       final end = (i + maxBatch < tokens.length) ? i + maxBatch : tokens.length;
       _client.decode(_handles, _handles.context, tokens.sublist(i, end));
     }
-  }
-
-  static int _maxStopSequenceLength(List<String> stopSequences) {
-    var maxLength = 0;
-    for (final stop in stopSequences) {
-      if (stop.length > maxLength) {
-        maxLength = stop.length;
-      }
-    }
-    return maxLength;
-  }
-
-  static int? _earliestStopIndex(String text, List<String> stopSequences) {
-    var earliestIndex = -1;
-    for (final stop in stopSequences) {
-      if (stop.isEmpty) {
-        continue;
-      }
-      final index = text.indexOf(stop);
-      if (index == -1) {
-        continue;
-      }
-      if (earliestIndex == -1 || index < earliestIndex) {
-        earliestIndex = index;
-      }
-    }
-    return earliestIndex == -1 ? null : earliestIndex;
   }
 
   Future<void> _asyncBoundary() => Future<void>.delayed(Duration.zero);

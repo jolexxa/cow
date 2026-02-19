@@ -42,6 +42,41 @@ void main() {
       expect(decoded.errorMessage, 'oops');
     });
 
+    test('MlxRuntimeOptions roundtrip', () {
+      final mlxOptions = MlxRuntimeOptions(
+        modelPath: StringBuffer('/models/mlx-model').toString(),
+        libraryPath: StringBuffer('/lib/libmlx.dylib').toString(),
+        contextSize: int.parse('4096'),
+        samplingOptions: SamplingOptions(
+          seed: int.parse('7'),
+          topK: int.parse('40'),
+          topP: 0.95,
+          temperature: 0.8,
+        ),
+        maxOutputTokensDefault: int.parse('1024'),
+      );
+
+      final decoded = MlxRuntimeOptions.fromJson(mlxOptions.toJson());
+      expect(decoded.modelPath, '/models/mlx-model');
+      expect(decoded.libraryPath, '/lib/libmlx.dylib');
+      expect(decoded.contextSize, 4096);
+      expect(decoded.maxOutputTokensDefault, 1024);
+      expect(decoded.samplingOptions.topK, 40);
+      expect(decoded.backend, InferenceBackend.mlx);
+    });
+
+    test('BackendRuntimeOptions.fromJson dispatches MLX branch', () {
+      const mlxOptions = MlxRuntimeOptions(
+        modelPath: '/models/mlx-model',
+        libraryPath: '/lib/libmlx.dylib',
+        contextSize: 2048,
+      );
+
+      final decoded = BackendRuntimeOptions.fromJson(mlxOptions.toJson());
+      expect(decoded, isA<MlxRuntimeOptions>());
+      expect((decoded as MlxRuntimeOptions).contextSize, 2048);
+    });
+
     test('configs and options roundtrip', () {
       final modelOptions = LlamaModelOptions(
         nGpuLayers: int.parse('8'),
@@ -58,7 +93,7 @@ void main() {
         nThreadsBatch: int.parse('2'),
         useFlashAttn: true,
       );
-      final samplingOptions = LlamaSamplingOptions(
+      final samplingOptions = SamplingOptions(
         seed: int.parse('42'),
         topK: int.parse('30'),
         topP: 0.9,
@@ -68,7 +103,7 @@ void main() {
         penaltyRepeat: 1.1,
         penaltyLastN: int.parse('64'),
       );
-      final runtime = LlamaRuntimeOptions(
+      final runtime = LlamaCppRuntimeOptions(
         modelPath: StringBuffer('/models/qwen.gguf').toString(),
         contextOptions: contextOptions,
         modelOptions: modelOptions,
@@ -90,9 +125,9 @@ void main() {
         LlamaContextOptions.fromJson(contextOptions.toJson()).useFlashAttn,
         isTrue,
       );
-      expect(LlamaSamplingOptions.fromJson(samplingOptions.toJson()).topK, 30);
+      expect(SamplingOptions.fromJson(samplingOptions.toJson()).topK, 30);
       expect(
-        LlamaRuntimeOptions.fromJson(runtime.toJson()).libraryPath,
+        LlamaCppRuntimeOptions.fromJson(runtime.toJson()).libraryPath,
         '/libllama.dylib',
       );
       expect(LlmConfig.fromJson(config.toJson()).reusePrefixMessageCount, 1);
@@ -101,8 +136,8 @@ void main() {
 
     test('requests roundtrip and default enum handling', () {
       final init = InitRequest(
-        modelPointer: 1,
-        runtimeOptions: LlamaRuntimeOptions(
+        modelHandle: 1,
+        options: LlamaCppRuntimeOptions(
           modelPath: StringBuffer('/models/qwen.gguf').toString(),
           libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
@@ -112,7 +147,7 @@ void main() {
             nThreadsBatch: int.parse('2'),
           ),
         ),
-        profile: LlamaProfileId.qwen25,
+        profile: ModelProfileId.qwen25,
         tools: [
           ToolDefinition(
             name: StringBuffer('search').toString(),
@@ -128,11 +163,11 @@ void main() {
       );
 
       final initDecoded = InitRequest.fromJson(init.toJson());
-      expect(initDecoded.profile, LlamaProfileId.qwen25);
+      expect(initDecoded.profile, ModelProfileId.qwen25);
 
       final unknownJson = init.toJson()..['profile'] = 'unknown';
       final unknownDecoded = InitRequest.fromJson(unknownJson);
-      expect(unknownDecoded.profile, LlamaProfileId.qwen3);
+      expect(unknownDecoded.profile, ModelProfileId.qwen3);
 
       final runTurn = RunTurnRequest(
         userMessage: Message(
@@ -193,7 +228,7 @@ void main() {
       );
       expect(
         BrainRequest.fromJson(initRequest.toJson()).init?.profile,
-        LlamaProfileId.qwen25,
+        ModelProfileId.qwen25,
       );
       expect(
         BrainRequest.fromJson(

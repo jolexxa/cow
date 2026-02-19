@@ -143,6 +143,7 @@ class ModelServer {
     required String modelPath,
     required String libraryPath,
     LlamaModelOptions modelOptions = const LlamaModelOptions(),
+    InferenceBackend backend = InferenceBackend.llamaCpp,
     ModelLoadProgressCallback? onProgress,
   }) {
     _ensureNotDisposed();
@@ -174,6 +175,7 @@ class ModelServer {
         modelPath: modelPath,
         libraryPath: libraryPath,
         modelOptions: modelOptions,
+        backend: backend,
       ).toJson(),
     );
 

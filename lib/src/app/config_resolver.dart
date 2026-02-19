@@ -17,11 +17,18 @@ class ResolvedModels {
 
 class ConfigResolver {
   /// Merges user config with built-in defaults.
-  static ResolvedModels resolve(CowConfig config) {
+  ///
+  /// When [mlxAvailable] is true (macOS ARM64 with MLX library present),
+  /// defaults to MLX model profiles for Apple Silicon native inference.
+  static ResolvedModels resolve(
+    CowConfig config, {
+    bool mlxAvailable = false,
+  }) {
     final builtins = <String, AppModelProfile>{
       AppModelId.qwen3.name: AppModelProfiles.qwen3,
       AppModelId.qwen25.name: AppModelProfiles.qwen25,
       AppModelId.qwen25_3b.name: AppModelProfiles.qwen25_3b,
+      AppModelId.qwen3Mlx.name: AppModelProfiles.qwen3Mlx,
     };
 
     final resolved = <String, AppModelProfile>{...builtins};
@@ -37,7 +44,10 @@ class ConfigResolver {
       }
     }
 
-    final primaryId = config.primaryModel ?? AppModelId.qwen3.name;
+    final defaultPrimary = mlxAvailable
+        ? AppModelId.qwen3Mlx.name
+        : AppModelId.qwen3.name;
+    final primaryId = config.primaryModel ?? defaultPrimary;
     final lightId = config.lightweightModel ?? AppModelId.qwen25_3b.name;
 
     final primary = resolved[primaryId];
@@ -94,17 +104,17 @@ class ConfigResolver {
       ),
       modelFamily: userModel.modelFamily != null
           ? _parseModelFamily(userModel.modelFamily!)
-          : LlamaProfileId.auto,
+          : ModelProfileId.auto,
       supportsReasoning: userModel.supportsReasoning ?? false,
       runtimeConfig: userModel.runtimeConfig ?? const ModelRuntimeConfig(),
     );
   }
 
-  static LlamaProfileId _parseModelFamily(String value) {
+  static ModelProfileId _parseModelFamily(String value) {
     return switch (value) {
-      'qwen3' => LlamaProfileId.qwen3,
-      'qwen25' => LlamaProfileId.qwen25,
-      'auto' => LlamaProfileId.auto,
+      'qwen3' => ModelProfileId.qwen3,
+      'qwen25' => ModelProfileId.qwen25,
+      'auto' => ModelProfileId.auto,
       _ => throw Exception(
         'Unknown modelFamily "$value". '
         'Expected one of: qwen3, qwen25, auto.',

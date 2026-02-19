@@ -1,7 +1,7 @@
 // Core contracts are evolving; we defer exhaustive API docs for now.
 // ignore_for_file: public_member_api_docs
 
-import 'package:cow_brain/src/adapters/llama/llama_stream_parser.dart';
+import 'package:cow_brain/src/adapters/stream_parser.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 
 extension RoleName on Role {
@@ -13,7 +13,7 @@ extension RoleName on Role {
   };
 }
 
-abstract interface class LlamaPromptFormatter {
+abstract interface class PromptFormatter {
   String format({
     required List<Message> messages,
     required List<ToolDefinition> tools,
@@ -25,12 +25,12 @@ abstract interface class LlamaPromptFormatter {
   bool get addBos;
 }
 
-final class LlamaModelProfile {
-  const LlamaModelProfile({
+final class ModelProfile {
+  const ModelProfile({
     required this.formatter,
     required this.streamParser,
   });
 
-  final LlamaPromptFormatter formatter;
-  final LlamaStreamParser streamParser;
+  final PromptFormatter formatter;
+  final StreamParser streamParser;
 }

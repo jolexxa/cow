@@ -1,21 +1,21 @@
 // Core contracts are evolving; we defer exhaustive API docs for now.
 // ignore_for_file: public_member_api_docs
 
-import 'package:cow_brain/src/adapters/llama/llama_prompt_formatter.dart';
-import 'package:cow_brain/src/adapters/llama/llama_stream_chunk.dart';
-import 'package:cow_brain/src/adapters/llama/llama_token_counter.dart';
+import 'package:cow_brain/src/adapters/local_token_counter.dart';
+import 'package:cow_brain/src/adapters/prompt_formatter.dart';
+import 'package:cow_brain/src/adapters/stream_chunk.dart';
 import 'package:cow_brain/src/context/context.dart';
 import 'package:cow_brain/src/core/llm_adapter.dart';
 import 'package:cow_brain/src/core/model_output.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 
-abstract interface class LlamaRuntime {
+abstract interface class InferenceRuntime {
   int countTokens(
     String prompt, {
     required bool addBos,
   });
 
-  Stream<LlamaStreamChunk> generate({
+  Stream<StreamChunk> generate({
     required String prompt,
     required List<String> stopSequences,
     required bool addBos,
@@ -25,20 +25,20 @@ abstract interface class LlamaRuntime {
 }
 
 /// Thin llama-based adapter that defers model specifics to a profile.
-final class LlamaAdapter implements LlmAdapter {
-  LlamaAdapter({
-    required LlamaRuntime runtime,
+final class InferenceAdapter implements LlmAdapter {
+  InferenceAdapter({
+    required InferenceRuntime runtime,
     required this.profile,
   }) : _runtime = runtime,
-       tokenCounter = LlamaTokenCounter(
+       tokenCounter = LocalTokenCounter(
          formatter: profile.formatter,
          tokenCounter: runtime.countTokens,
        );
 
-  final LlamaRuntime _runtime;
+  final InferenceRuntime _runtime;
 
   /// The resolved model profile used by this adapter.
-  final LlamaModelProfile profile;
+  final ModelProfile profile;
 
   /// Exposes a formatter-aware token counter for the context manager.
   final TokenCounter tokenCounter;

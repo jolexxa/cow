@@ -82,9 +82,9 @@ void main() {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
       expect(harness.events, isA<Stream<AgentEvent>>());
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -95,9 +95,9 @@ void main() {
     test('runTurn streams events and completes on turn_finished', () async {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -123,9 +123,9 @@ void main() {
     test('runTurn terminates on error without turn id', () async {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -177,9 +177,9 @@ void main() {
     test('runTurn refuses when a turn is active', () async {
       final harness = BrainHarness(entrypoint: _slowBrainIsolate);
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -206,9 +206,9 @@ void main() {
     test('dispose is idempotent', () async {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -220,9 +220,9 @@ void main() {
     test('operations after dispose throw', () async {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -240,8 +240,8 @@ void main() {
   });
 }
 
-LlamaRuntimeOptions _runtimeOptions() {
-  return const LlamaRuntimeOptions(
+LlamaCppRuntimeOptions _runtimeOptions() {
+  return const LlamaCppRuntimeOptions(
     modelPath: '/tmp/model.gguf',
     libraryPath: '/tmp/libllama.so',
     contextOptions: LlamaContextOptions(

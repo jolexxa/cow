@@ -3,10 +3,10 @@
 
 import 'dart:async';
 
-import 'package:cow_brain/src/adapters/llama/llama_stream_chunk.dart';
-import 'package:cow_brain/src/adapters/llama/llama_stream_parser.dart';
-import 'package:cow_brain/src/adapters/llama/stream_tokenizer.dart';
-import 'package:cow_brain/src/adapters/llama/tool_call_extractor.dart';
+import 'package:cow_brain/src/adapters/stream_chunk.dart';
+import 'package:cow_brain/src/adapters/stream_parser.dart';
+import 'package:cow_brain/src/adapters/stream_tokenizer.dart';
+import 'package:cow_brain/src/adapters/tool_call_extractor.dart';
 import 'package:cow_brain/src/core/model_output.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:cow_brain/src/utils/json_brace_utils.dart';
@@ -47,13 +47,13 @@ enum _ParserState { normal, reasoning, toolCall }
 /// Universal stream parser for all supported model families.
 ///
 /// Same state machine architecture, but parameterized via [StreamParserConfig].
-final class UniversalStreamParser implements LlamaStreamParser {
+final class UniversalStreamParser implements StreamParser {
   UniversalStreamParser({required this.config});
 
   final StreamParserConfig config;
 
   @override
-  Stream<ModelOutput> parse(Stream<LlamaStreamChunk> chunks) {
+  Stream<ModelOutput> parse(Stream<StreamChunk> chunks) {
     final output = StreamController<ModelOutput>();
     final textController = StreamController<String>();
 

@@ -21,7 +21,7 @@ void main() {
       final state = StateA();
       binding.setState(state);
 
-      expect(received.single, state);
+      expect(received.single, same(state));
     });
 
     test('input triggers onInput handlers', () {

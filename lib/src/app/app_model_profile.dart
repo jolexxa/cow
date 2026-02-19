@@ -8,10 +8,12 @@ class AppModelProfile {
     required this.modelFamily,
     required this.supportsReasoning,
     this.runtimeConfig = const ModelRuntimeConfig(),
+    this.backend = InferenceBackend.llamaCpp,
   });
 
   final DownloadableModel downloadableModel;
-  final LlamaProfileId modelFamily;
+  final ModelProfileId modelFamily;
   final bool supportsReasoning;
   final ModelRuntimeConfig runtimeConfig;
+  final InferenceBackend backend;
 }

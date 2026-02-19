@@ -59,9 +59,9 @@ Cow Brain provides high-level agentic functionality for the Cow terminal AI appl
   │  ┌──────────────────────────────────────────────────────────┐   │
   │  │ LlmAdapter (interface)                                   │   │
   │  │                                                          │   │
-  │  │ LlamaAdapter (implementation)                            │   │
+  │  │ InferenceAdapter (implementation)                            │   │
   │  │ ┌─────────────────────────────────────────────────────┐  │   │
-  │  │ │ • Formats prompt via LlamaModelProfile              │  │   │
+  │  │ │ • Formats prompt via ModelProfile              │  │   │
   │  │ │ • Feeds tokens to runtime                           │  │   │
   │  │ │ • Parses streaming output via UniversalStreamParser │  │   │
   │  │ │ • Yields ModelOutput events back to AgentLoop       │  │   │
@@ -90,9 +90,9 @@ Cow Brain provides high-level agentic functionality for the Cow terminal AI appl
   MODEL PROFILES (pluggable per-model behavior)
   ══════════════════════════════════════════════
 
-    LlamaModelProfile
-    ├── formatter:    LlamaPromptFormatter    (turns messages → prompt string)
-    └── streamParser: LlamaStreamParser       (turns raw tokens → ModelOutput)
+    ModelProfile
+    ├── formatter:    PromptFormatter    (turns messages → prompt string)
+    └── streamParser: StreamParser       (turns raw tokens → ModelOutput)
                       └── UniversalStreamParser
                           ├── StreamTokenizer        (tag-aware tokenizer)
                           └── ToolCallExtractor      (extracts tool calls)

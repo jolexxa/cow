@@ -52,6 +52,7 @@ final class LoadModelRequest extends ModelServerRequest {
     required this.modelPath,
     required this.libraryPath,
     this.modelOptions = const LlamaModelOptions(),
+    this.backend = InferenceBackend.llamaCpp,
     this.type = ModelServerRequestType.loadModel,
   });
 
@@ -63,6 +64,8 @@ final class LoadModelRequest extends ModelServerRequest {
   final String modelPath;
   final String libraryPath;
   final LlamaModelOptions modelOptions;
+  @JsonKey(unknownEnumValue: InferenceBackend.llamaCpp)
+  final InferenceBackend backend;
 
   @override
   Map<String, Object?> toJson() => _$LoadModelRequestToJson(this);

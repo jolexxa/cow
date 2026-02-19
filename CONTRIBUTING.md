@@ -32,9 +32,9 @@ Once resolved, the path is passed through all layers explicitly:
 
 - `AppInfo.initialize()` in `lib/src/app/app_info.dart`:
   - Calls `platform.resolveLlamaLibraryPath()`.
-  - Creates `LlamaRuntimeOptions(libraryPath: ...)` for both the main and summary runtimes.
+  - Creates `BackendRuntimeOptions` (either `LlamaCppRuntimeOptions` or `MlxRuntimeOptions`) for both the main and summary runtimes.
 - UI setup in `lib/src/features/chat/view/chat_page.dart`:
-  - Instantiates `CowBrains(libraryPath: appInfo.llamaRuntimeOptions.libraryPath)`.
+  - Instantiates `CowBrains(libraryPath: appInfo.primaryOptions.libraryPath)`.
 - Brain API in `packages/cow_brain/lib/src/cow_brain_api.dart`:
   - `CowBrains` owns a `LlamaBackend(libraryPath: ...)`.
   - Each `CowBrain` uses that backend and calls `_backend.ensureInitialized()` during `init()`.

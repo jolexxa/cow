@@ -6,6 +6,7 @@ import 'dart:ffi';
 import 'dart:typed_data';
 
 import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/stream_chunk.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 import 'package:test/test.dart';
@@ -21,7 +22,7 @@ void main() {
 
       final runtime = LlamaCppRuntime(
         modelPointer: 1,
-        options: const LlamaRuntimeOptions(
+        options: const LlamaCppRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
@@ -59,7 +60,7 @@ void main() {
 
       final runtime = LlamaCppRuntime(
         modelPointer: 1,
-        options: const LlamaRuntimeOptions(
+        options: const LlamaCppRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
@@ -97,7 +98,7 @@ void main() {
 
       final runtime = LlamaCppRuntime(
         modelPointer: 1,
-        options: const LlamaRuntimeOptions(
+        options: const LlamaCppRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
@@ -134,7 +135,7 @@ void main() {
 
       final runtime = LlamaCppRuntime(
         modelPointer: 1,
-        options: const LlamaRuntimeOptions(
+        options: const LlamaCppRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
@@ -175,7 +176,7 @@ void main() {
 
       final runtime = LlamaCppRuntime(
         modelPointer: 1,
-        options: const LlamaRuntimeOptions(
+        options: const LlamaCppRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
@@ -212,7 +213,7 @@ void main() {
 
       final runtime = LlamaCppRuntime(
         modelPointer: 1,
-        options: const LlamaRuntimeOptions(
+        options: const LlamaCppRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
@@ -250,7 +251,7 @@ void main() {
 
         final runtime = LlamaCppRuntime(
           modelPointer: 1,
-          options: const LlamaRuntimeOptions(
+          options: const LlamaCppRuntimeOptions(
             modelPath: 'model',
             libraryPath: '/tmp/libllama.so',
             contextOptions: LlamaContextOptions(
@@ -292,7 +293,7 @@ void main() {
 
       final runtime = LlamaCppRuntime(
         modelPointer: 1,
-        options: const LlamaRuntimeOptions(
+        options: const LlamaCppRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
@@ -338,7 +339,7 @@ void main() {
       expect(
         () => LlamaCppRuntime(
           modelPointer: 1,
-          options: const LlamaRuntimeOptions(
+          options: const LlamaCppRuntimeOptions(
             modelPath: 'model',
             libraryPath: '/tmp/libllama.so',
             contextOptions: LlamaContextOptions(
@@ -382,7 +383,7 @@ void main() {
 
       final runtime = LlamaCppRuntime(
         modelPointer: 1,
-        options: const LlamaRuntimeOptions(
+        options: const LlamaCppRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(
@@ -411,6 +412,164 @@ void main() {
       expect(text, 'a' * 16);
     });
 
+    test('yields heartbeat chunk after 16'
+        ' consecutive control tokens', () async {
+      final bindings = FakeLlamaBindings();
+      // All tokens are control tokens.
+      bindings.vocabIsControlImpl = (_, _) => true;
+      bindings.vocabIsEogImpl = (_, _) => false;
+
+      // Provide 17 tokens so the 16th empty step triggers the boundary and
+      // the 17th acts as the EOG (token 999 which is EOG by sampleQueue being
+      // empty — sampleQueue.isEmpty returns 0 which is EOG when vocabIsEog
+      // returns false for 0, but we stop via maxOutputTokens).
+      final client = FakeClient(bindings)
+        ..tokenizeResult = [1]
+        ..sampleQueue.addAll(List<int>.filled(17, 2)); // 17 control tokens
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 17,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      final output = await runtime
+          .generate(
+            prompt: 'hi',
+            stopSequences: const [],
+            addBos: true,
+            requiresReset: false,
+            reusePrefixMessageCount: 0,
+          )
+          .toList();
+
+      // After 16 control tokens the assembler heartbeat fires with empty text.
+      final heartbeats = output.where((c) => c.text.isEmpty).toList();
+      expect(heartbeats, isNotEmpty);
+      expect(heartbeats.first.tokenCountDelta, greaterThan(0));
+    });
+
+    test(
+      'yields heartbeat chunk after 16 consecutive empty-bytes tokens',
+      () async {
+        final bindings = FakeLlamaBindings();
+        bindings.vocabIsEogImpl = (_, _) => false;
+        bindings.vocabIsControlImpl = (_, _) => false;
+
+        // All token bytes are empty — causes the bytes.isEmpty branch.
+        final client = FakeClient(bindings)
+          ..tokenizeResult = [1]
+          ..sampleQueue.addAll(List<int>.filled(17, 5));
+
+        // tokenBytes[5] is not set so FakeClient.tokenToBytes returns
+        // Uint8List.fromList([token]) = [5] which is NOT empty.
+        // We need bytes to be empty for this path — use token 99.
+        // Actually by default tokenBytes[t] returns [t] (non-empty).
+        // To get empty bytes we set tokenBytes[5] = [].
+        (client
+                  ..sampleQueue.clear()
+                  ..sampleQueue.addAll(List<int>.filled(17, 5)))
+                .tokenBytes[5] =
+            [];
+
+        final runtime = LlamaCppRuntime(
+          modelPointer: 1,
+          options: const LlamaCppRuntimeOptions(
+            modelPath: 'model',
+            libraryPath: '/tmp/libllama.so',
+            contextOptions: LlamaContextOptions(
+              contextSize: 64,
+              nBatch: 4,
+              nThreads: 1,
+              nThreadsBatch: 1,
+            ),
+            maxOutputTokensDefault: 17,
+          ),
+          client: client,
+          bindings: bindings,
+        );
+
+        final output = await runtime
+            .generate(
+              prompt: 'hi',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        final heartbeats = output.where((c) => c.text.isEmpty).toList();
+        expect(heartbeats, isNotEmpty);
+        expect(heartbeats.first.tokenCountDelta, greaterThan(0));
+      },
+    );
+
+    test(
+      'handles incomplete UTF-8 sequence that produces empty decoded chunk',
+      () async {
+        // 0xC2 alone is an incomplete 2-byte UTF-8 sequence. The first call
+        // to byteSink.add([0xC2]) produces no output (decodedChunks stays
+        // empty), hitting the decodedChunks.isEmpty path. The final flush
+        // emits the replacement character via assembler.flush().
+        final bindings = FakeLlamaBindings();
+        bindings.vocabIsEogImpl = (_, _) => false;
+        bindings.vocabIsControlImpl = (_, _) => false;
+
+        final client = FakeClient(bindings)
+          ..tokenizeResult = [1]
+          ..sampleQueue.addAll([6, 999]) // 0xC2 token, then EOG-by-emptiness
+          ..tokenBytes[6] = [0xC2]; // incomplete UTF-8 — first byte only
+
+        // Token 999 is not EOG (vocabIsEog returns false), but the queue is
+        // now empty so sampleNext returns 0 which is checked against vocabIsEog
+        // (false) and continues; but maxOutputTokens=2 limits this.
+        final runtime = LlamaCppRuntime(
+          modelPointer: 1,
+          options: const LlamaCppRuntimeOptions(
+            modelPath: 'model',
+            libraryPath: '/tmp/libllama.so',
+            contextOptions: LlamaContextOptions(
+              contextSize: 16,
+              nBatch: 4,
+              nThreads: 1,
+              nThreadsBatch: 1,
+            ),
+            maxOutputTokensDefault: 1,
+          ),
+          client: client,
+          bindings: bindings,
+        );
+
+        final output = await runtime
+            .generate(
+              prompt: 'hi',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        // The 0xC2 token doesn't decode immediately (decodedChunks.isEmpty),
+        // so no text chunk is emitted during the loop. The flush() may emit
+        // the replacement char from the closed byteSink.
+        // Verify no exception was thrown and generation completed.
+        expect(output, isA<List<StreamChunk>>());
+      },
+    );
+
     test('final stop sequence check uses substring branch', () async {
       final bindings = FakeLlamaBindings()..vocabIsEogImpl = (_, _) => false;
       final client = FakeClient(bindings)
@@ -420,7 +579,7 @@ void main() {
 
       final runtime = LlamaCppRuntime(
         modelPointer: 1,
-        options: const LlamaRuntimeOptions(
+        options: const LlamaCppRuntimeOptions(
           modelPath: 'model',
           libraryPath: '/tmp/libllama.so',
           contextOptions: LlamaContextOptions(

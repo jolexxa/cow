@@ -1,26 +1,26 @@
 // Core contracts are evolving; we defer exhaustive API docs for now.
 // ignore_for_file: public_member_api_docs
 
-import 'package:cow_brain/src/adapters/llama/llama_prompt_formatter.dart';
+import 'package:cow_brain/src/adapters/prompt_formatter.dart';
 import 'package:cow_brain/src/context/context.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 
-typedef LlamaPromptTokenCounter =
+typedef PromptTokenCounter =
     int Function(
       String prompt, {
       required bool addBos,
     });
 
 /// Token counter that counts tokens on the fully formatted prompt.
-final class LlamaTokenCounter implements TokenCounter {
-  const LlamaTokenCounter({
-    required LlamaPromptFormatter formatter,
-    required LlamaPromptTokenCounter tokenCounter,
+final class LocalTokenCounter implements TokenCounter {
+  const LocalTokenCounter({
+    required PromptFormatter formatter,
+    required PromptTokenCounter tokenCounter,
   }) : _formatter = formatter,
        _tokenCounter = tokenCounter;
 
-  final LlamaPromptFormatter _formatter;
-  final LlamaPromptTokenCounter _tokenCounter;
+  final PromptFormatter _formatter;
+  final PromptTokenCounter _tokenCounter;
 
   @override
   int countPromptTokens({

@@ -1,0 +1,6 @@
+.dart_tool/
+.packages
+pubspec.lock
+
+# Prebuilt native libraries (built from cow_mlx, not committed).
+assets/native/macos/arm64/*.dylib

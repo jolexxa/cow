@@ -16,8 +16,8 @@ class AppInfo {
     required this.toolRegistry,
     required this.modelProfile,
     required this.summaryModelProfile,
-    required this.llamaRuntimeOptions,
-    required this.summaryRuntimeOptions,
+    required this.primaryOptions,
+    required this.summaryOptions,
     required this.requiredProfilesPresent,
     required this.cowPaths,
     required this.modelServer,
@@ -35,8 +35,8 @@ class AppInfo {
   final OSPlatform platform;
   final AppModelProfile modelProfile;
   final AppModelProfile summaryModelProfile;
-  final LlamaRuntimeOptions llamaRuntimeOptions;
-  final LlamaRuntimeOptions summaryRuntimeOptions;
+  final BackendRuntimeOptions primaryOptions;
+  final BackendRuntimeOptions summaryOptions;
   final bool requiredProfilesPresent;
   final CowPaths cowPaths;
   final ModelServer modelServer;
@@ -46,7 +46,8 @@ class AppInfo {
   }) async {
     final cowPaths = CowPaths();
     final config = CowConfig.fromFile(cowPaths.configFile);
-    final resolved = ConfigResolver.resolve(config);
+    final mlxAvailable = platform.resolveMlxLibraryPath() != null;
+    final resolved = ConfigResolver.resolve(config, mlxAvailable: mlxAvailable);
     final modelProfile = resolved.primary;
     final summaryModelProfile = resolved.lightweight;
     final toolRegistry = ToolRegistry()
@@ -72,20 +73,24 @@ class AppInfo {
         );
 
     final rng = Random();
-    final runtimeOptions = _buildRuntimeOptions(
+    final mlxLibraryPath = platform.resolveMlxLibraryPath();
+
+    final primaryOptions = _buildOptions(
       profile: modelProfile,
       platform: platform,
       cowPaths: cowPaths,
       seed: rng.nextInt(1 << 31),
       nGpuLayers: platform.nGpuLayers,
+      mlxLibraryPath: mlxLibraryPath,
     );
 
-    final summaryRuntimeOptions = _buildRuntimeOptions(
+    final summaryOptions = _buildOptions(
       profile: summaryModelProfile,
       platform: platform,
       cowPaths: cowPaths,
       seed: rng.nextInt(1 << 31),
       nGpuLayers: 0, // Run summary on CPU
+      mlxLibraryPath: mlxLibraryPath,
       maxOutputTokensOverride: _summaryMaxTokens,
     );
 
@@ -96,27 +101,48 @@ class AppInfo {
       toolRegistry: toolRegistry,
       modelProfile: modelProfile,
       summaryModelProfile: summaryModelProfile,
-      llamaRuntimeOptions: runtimeOptions,
-      summaryRuntimeOptions: summaryRuntimeOptions,
+      primaryOptions: primaryOptions,
+      summaryOptions: summaryOptions,
       requiredProfilesPresent: requiredProfilesPresent,
       cowPaths: cowPaths,
       modelServer: modelServer,
     );
   }
 
-  static LlamaRuntimeOptions _buildRuntimeOptions({
+  static BackendRuntimeOptions _buildOptions({
     required AppModelProfile profile,
     required OSPlatform platform,
     required CowPaths cowPaths,
     required int seed,
     required int nGpuLayers,
+    required String? mlxLibraryPath,
     int? maxOutputTokensOverride,
   }) {
     final config = profile.runtimeConfig;
     final contextSize = config.contextSize ?? _defaultContextSize;
     final maxOut = maxOutputTokensOverride ?? (contextSize ~/ 2);
 
-    return LlamaRuntimeOptions(
+    final sampling = SamplingOptions(
+      seed: seed,
+      temperature: config.temperature,
+      topK: config.topK,
+      topP: config.topP,
+      minP: config.minP,
+      penaltyRepeat: config.penaltyRepeat,
+      penaltyLastN: config.penaltyLastN,
+    );
+
+    if (profile.backend == InferenceBackend.mlx && mlxLibraryPath != null) {
+      return MlxRuntimeOptions(
+        modelPath: cowPaths.modelDir(profile.downloadableModel),
+        libraryPath: mlxLibraryPath,
+        contextSize: contextSize,
+        maxOutputTokensDefault: maxOut,
+        samplingOptions: sampling,
+      );
+    }
+
+    return LlamaCppRuntimeOptions(
       modelPath: cowPaths.modelEntrypoint(profile.downloadableModel),
       libraryPath: platform.resolveLlamaLibraryPath(),
       modelOptions: LlamaModelOptions(
@@ -125,15 +151,7 @@ class AppInfo {
         useMlock: false,
       ),
       maxOutputTokensDefault: maxOut,
-      samplingOptions: LlamaSamplingOptions(
-        seed: seed,
-        temperature: config.temperature,
-        topK: config.topK,
-        topP: config.topP,
-        minP: config.minP,
-        penaltyRepeat: config.penaltyRepeat,
-        penaltyLastN: config.penaltyLastN,
-      ),
+      samplingOptions: sampling,
       contextOptions: LlamaContextOptions(
         contextSize: contextSize,
         nBatch: _batchSize,

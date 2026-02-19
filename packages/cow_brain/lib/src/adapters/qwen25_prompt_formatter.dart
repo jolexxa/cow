@@ -3,7 +3,7 @@
 
 import 'dart:convert';
 
-import 'package:cow_brain/src/adapters/llama/llama_prompt_formatter.dart';
+import 'package:cow_brain/src/adapters/prompt_formatter.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 
 // Reference template (Hugging Face): Qwen/Qwen2.5-7B-Instruct-GGUF, chat_template=default.
@@ -12,7 +12,7 @@ import 'package:cow_brain/src/isolate/models.dart';
 /// Based on the official template provided by Alibaba Cloud (shown above in this
 /// file).
 /// <https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF?chat_template=default>
-final class Qwen25PromptFormatter implements LlamaPromptFormatter {
+final class Qwen25PromptFormatter implements PromptFormatter {
   const Qwen25PromptFormatter();
 
   @override

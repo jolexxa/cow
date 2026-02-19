@@ -25,6 +25,8 @@ dependencies:
   logic_blocks:
     path: packages/logic_blocks
   meta: ^1.18.0
+  mlx_dart:
+    path: packages/mlx_dart
   nocterm: ^0.4.4
   path: ^1.9.1
   platform: ^3.1.5

@@ -8,6 +8,7 @@ enum AppModelId {
   qwen3,
   qwen25,
   qwen25_3b,
+  qwen3Mlx,
 }
 
 final class AppModelProfiles {
@@ -23,7 +24,7 @@ final class AppModelProfiles {
         ),
       ],
     ),
-    modelFamily: LlamaProfileId.qwen3,
+    modelFamily: ModelProfileId.qwen3,
     supportsReasoning: true,
     runtimeConfig: const ModelRuntimeConfig(contextSize: 10000),
   );
@@ -45,7 +46,7 @@ final class AppModelProfiles {
         ),
       ],
     ),
-    modelFamily: LlamaProfileId.qwen25,
+    modelFamily: ModelProfileId.qwen25,
     supportsReasoning: false,
     runtimeConfig: const ModelRuntimeConfig(contextSize: 10000),
   );
@@ -62,12 +63,53 @@ final class AppModelProfiles {
         ),
       ],
     ),
-    modelFamily: LlamaProfileId.qwen25,
+    modelFamily: ModelProfileId.qwen25,
     supportsReasoning: false,
     runtimeConfig: const ModelRuntimeConfig(
       contextSize: 2048,
       temperature: 0.3,
     ),
+  );
+
+  /// Qwen3-8B for MLX (Apple Silicon native).
+  static final AppModelProfile qwen3Mlx = AppModelProfile(
+    downloadableModel: DownloadableModel(
+      id: AppModelId.qwen3Mlx.name,
+      entrypointFileName: 'config.json',
+      files: const [
+        // MLX models are directories — the model manager downloads
+        // individual files into the model directory.
+        DownloadableModelFile(
+          url:
+              'https://huggingface.co/mlx-community/Qwen3-8B-4bit/resolve/main/config.json',
+          fileName: 'config.json',
+        ),
+        DownloadableModelFile(
+          url:
+              'https://huggingface.co/mlx-community/Qwen3-8B-4bit/resolve/main/model.safetensors',
+          fileName: 'model.safetensors',
+        ),
+        DownloadableModelFile(
+          url:
+              'https://huggingface.co/mlx-community/Qwen3-8B-4bit/resolve/main/tokenizer.json',
+          fileName: 'tokenizer.json',
+        ),
+        DownloadableModelFile(
+          url:
+              'https://huggingface.co/mlx-community/Qwen3-8B-4bit/resolve/main/tokenizer_config.json',
+          fileName: 'tokenizer_config.json',
+        ),
+        DownloadableModelFile(
+          url:
+              'https://huggingface.co/mlx-community/Qwen3-8B-4bit/resolve/main/special_tokens_map.json',
+          fileName: 'special_tokens_map.json',
+        ),
+      ],
+    ),
+    modelFamily: ModelProfileId.qwen3,
+    supportsReasoning: true,
+    runtimeConfig: const ModelRuntimeConfig(contextSize: 10000),
+    backend: InferenceBackend.mlx,
   );
 
   static AppModelProfile get primaryProfile => qwen3;

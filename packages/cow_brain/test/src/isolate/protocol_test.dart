@@ -1,7 +1,7 @@
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:test/test.dart';
 
-const _runtimeOptions = LlamaRuntimeOptions(
+const _runtimeOptions = LlamaCppRuntimeOptions(
   modelPath: '/tmp/model.gguf',
   libraryPath: '/tmp/libllama.so',
   contextOptions: LlamaContextOptions(
@@ -23,9 +23,9 @@ void main() {
       const request = BrainRequest(
         type: BrainRequestType.init,
         init: InitRequest(
-          modelPointer: 1,
-          runtimeOptions: _runtimeOptions,
-          profile: LlamaProfileId.qwen3,
+          modelHandle: 1,
+          options: _runtimeOptions,
+          profile: ModelProfileId.qwen3,
           tools: [
             ToolDefinition(
               name: 'search',
@@ -46,16 +46,16 @@ void main() {
       expect(decoded.init!.settings.maxSteps, 8);
       expect(decoded.init!.enableReasoning, isTrue);
       expect(decoded.init!.tools, hasLength(1));
-      expect(decoded.init!.runtimeOptions.modelPath, '/tmp/model.gguf');
+      expect(decoded.init!.options.modelPath, '/tmp/model.gguf');
     });
 
     test('init roundtrip preserves profile ids', () {
       const request = BrainRequest(
         type: BrainRequestType.init,
         init: InitRequest(
-          modelPointer: 1,
-          runtimeOptions: _runtimeOptions,
-          profile: LlamaProfileId.qwen25,
+          modelHandle: 1,
+          options: _runtimeOptions,
+          profile: ModelProfileId.qwen25,
           tools: <ToolDefinition>[],
           settings: _settings,
           enableReasoning: false,
@@ -65,7 +65,7 @@ void main() {
       final json = request.toJson();
       final decoded = BrainRequest.fromJson(json);
 
-      expect(decoded.init!.profile, LlamaProfileId.qwen25);
+      expect(decoded.init!.profile, ModelProfileId.qwen25);
     });
 
     test('run_turn roundtrip preserves settings', () {

@@ -16,7 +16,7 @@ class ChatPageView extends StatelessComponent {
     return BlocProvider<ChatCubit>.create(
       create: (context) {
         final brains = CowBrains<String>(
-          libraryPath: appInfo.llamaRuntimeOptions.libraryPath,
+          libraryPath: appInfo.primaryOptions.libraryPath,
           modelServer: appInfo.modelServer,
         );
         final primaryBrain = brains.create(ChatCubit.primaryBrainKey);
@@ -33,9 +33,9 @@ class ChatPageView extends StatelessComponent {
         final chatCubit = ChatCubit(
           logic: logic,
           toolRegistry: appInfo.toolRegistry,
-          llamaRuntimeOptions: appInfo.llamaRuntimeOptions,
+          primaryOptions: appInfo.primaryOptions,
           modelProfile: appInfo.modelProfile,
-          summaryRuntimeOptions: appInfo.summaryRuntimeOptions,
+          summaryOptions: appInfo.summaryOptions,
           summaryModelProfile: appInfo.summaryModelProfile,
           brains: brains,
           primaryBrain: primaryBrain,

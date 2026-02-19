@@ -1,27 +1,33 @@
 import 'dart:async';
 
-import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/extractors/json_tool_call_extractor.dart';
+import 'package:cow_brain/src/adapters/inference_adapter.dart';
+import 'package:cow_brain/src/adapters/prompt_formatter.dart';
+import 'package:cow_brain/src/adapters/qwen3_prompt_formatter.dart';
+import 'package:cow_brain/src/adapters/stream_chunk.dart';
+import 'package:cow_brain/src/adapters/stream_tokenizer.dart';
+import 'package:cow_brain/src/adapters/universal_stream_parser.dart';
 import 'package:cow_brain/src/core/model_output.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('LlamaAdapter', () {
+  group('InferenceAdapter', () {
     const config = LlmConfig(
       requiresReset: false,
       reusePrefixMessageCount: 0,
     );
 
     test('parses runtime output into model outputs', () async {
-      final runtime = FakeLlamaRuntime(
+      final runtime = FakeInferenceRuntime(
         outputChunks: const [
           '<think>Quiet plan.</think>',
           'Working...<tool_call>{"id":"1","name":"search","arguments":{"query":"cows"}}</tool_call>',
         ],
       );
-      final adapter = LlamaAdapter(
+      final adapter = InferenceAdapter(
         runtime: runtime,
-        profile: LlamaModelProfile(
+        profile: ModelProfile(
           formatter: const Qwen3PromptFormatter(),
           streamParser: UniversalStreamParser(
             config: StreamParserConfig(
@@ -65,10 +71,10 @@ void main() {
     });
 
     test('exposes a formatter-aware token counter', () {
-      final runtime = FakeLlamaRuntime(outputChunks: const []);
-      final adapter = LlamaAdapter(
+      final runtime = FakeInferenceRuntime(outputChunks: const []);
+      final adapter = InferenceAdapter(
         runtime: runtime,
-        profile: LlamaModelProfile(
+        profile: ModelProfile(
           formatter: const Qwen3PromptFormatter(),
           streamParser: UniversalStreamParser(
             config: StreamParserConfig(
@@ -91,10 +97,10 @@ void main() {
     });
 
     test('forwards formatter settings to the runtime', () async {
-      final runtime = FakeLlamaRuntime(outputChunks: const ['Hi']);
-      final adapter = LlamaAdapter(
+      final runtime = FakeInferenceRuntime(outputChunks: const ['Hi']);
+      final adapter = InferenceAdapter(
         runtime: runtime,
-        profile: LlamaModelProfile(
+        profile: ModelProfile(
           formatter: const Qwen3PromptFormatter(),
           streamParser: UniversalStreamParser(
             config: StreamParserConfig(
@@ -128,8 +134,8 @@ void main() {
   });
 }
 
-final class FakeLlamaRuntime implements LlamaRuntime {
-  FakeLlamaRuntime({required this.outputChunks});
+final class FakeInferenceRuntime implements InferenceRuntime {
+  FakeInferenceRuntime({required this.outputChunks});
 
   final List<String> outputChunks;
   String lastPrompt = '';
@@ -144,7 +150,7 @@ final class FakeLlamaRuntime implements LlamaRuntime {
   }
 
   @override
-  Stream<LlamaStreamChunk> generate({
+  Stream<StreamChunk> generate({
     required String prompt,
     required List<String> stopSequences,
     required bool addBos,
@@ -155,7 +161,7 @@ final class FakeLlamaRuntime implements LlamaRuntime {
     lastAddBos = addBos;
     lastStopSequences = stopSequences;
     for (final chunk in outputChunks) {
-      yield LlamaStreamChunk(text: chunk, tokenCountDelta: 0);
+      yield StreamChunk(text: chunk, tokenCountDelta: 0);
     }
   }
 }
