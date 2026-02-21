@@ -12,25 +12,29 @@
     },
     "primaryModel": {
       "type": "string",
-      "description": "ID of the model to use as the primary (heavy) model. Defaults to \"qwen3\".",
+      "description": "ID of the model to use as the primary (heavy) model. Defaults vary by platform — \"qwen3Mlx\" on Apple Silicon, \"qwen3\" elsewhere.",
       "enum": [
         "qwen3",
         "qwen25",
-        "qwen25_3b"
+        "qwen25_3b",
+        "qwen3Mlx",
+        "qwen25_3bMlx"
       ]
     },
     "lightweightModel": {
       "type": "string",
-      "description": "ID of the model to use as the lightweight model. Defaults to \"qwen25_3b\".",
+      "description": "ID of the model to use as the lightweight (summary) model. Defaults vary by platform — \"qwen25_3bMlx\" on Apple Silicon, \"qwen25_3b\" elsewhere.",
       "enum": [
         "qwen3",
         "qwen25",
-        "qwen25_3b"
+        "qwen25_3b",
+        "qwen3Mlx",
+        "qwen25_3bMlx"
       ]
     },
     "models": {
       "type": "object",
-      "description": "Map of model ID to model config. Built-in IDs (qwen3, qwen25, qwen25_3b) can be overridden; custom IDs define new models.",
+      "description": "Map of model ID to model config. Built-in IDs can be overridden; custom IDs define new models.",
       "additionalProperties": {
         "$ref": "#/$defs/CowModelConfig"
       }
@@ -51,7 +55,7 @@
         },
         "entrypointFileName": {
           "type": "string",
-          "description": "The filename of the main GGUF file to load. Required for custom models."
+          "description": "The filename of the main model file to load (e.g. a .gguf file for llama.cpp or config.json for MLX). Required for custom models."
         },
         "modelFamily": {
           "type": "string",
@@ -60,6 +64,14 @@
             "qwen3",
             "qwen25",
             "auto"
+          ]
+        },
+        "backend": {
+          "type": "string",
+          "description": "The inference backend to use. \"llama_cpp\" for GGUF models, \"mlx\" for MLX/safetensors models (Apple Silicon only). Required for custom models.",
+          "enum": [
+            "llama_cpp",
+            "mlx"
           ]
         },
         "supportsReasoning": {

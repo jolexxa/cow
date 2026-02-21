@@ -23,3 +23,5 @@ coverage/
 
 # External packages reference
 external/
+
+*.profraw

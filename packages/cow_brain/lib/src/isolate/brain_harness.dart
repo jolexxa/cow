@@ -13,6 +13,8 @@ final class BrainHarness {
 
   final BrainIsolateEntry _entrypoint;
   final ReceivePort _receivePort = ReceivePort();
+  final ReceivePort _exitPort = ReceivePort();
+  final ReceivePort _errorPort = ReceivePort();
   final StreamController<AgentEvent> _events =
       StreamController<AgentEvent>.broadcast();
   final Completer<SendPort> _sendPortCompleter = Completer<SendPort>();
@@ -155,6 +157,8 @@ final class BrainHarness {
     }
     await _events.close();
     _receivePort.close();
+    _exitPort.close();
+    _errorPort.close();
     if (_started) {
       _isolate.kill(priority: Isolate.immediate);
     }
@@ -165,9 +169,35 @@ final class BrainHarness {
       return;
     }
     _receivePort.listen(_handleMessage);
-    _isolate = await Isolate.spawn(_entrypoint, _receivePort.sendPort);
+
+    _exitPort.listen((_) {
+      if (!_disposed) {
+        _handleIsolateDeath('Isolate exited unexpectedly (native crash?)');
+      }
+    });
+
+    _errorPort.listen((message) {
+      final details = message is List ? message.join(': ') : '$message';
+      if (!_disposed) {
+        _handleIsolateDeath('Isolate error: $details');
+      }
+    });
+
+    _isolate = await Isolate.spawn(
+      _entrypoint,
+      _receivePort.sendPort,
+      onExit: _exitPort.sendPort,
+      onError: _errorPort.sendPort,
+    );
     _sendPort = await _sendPortCompleter.future;
     _started = true;
+  }
+
+  void _handleIsolateDeath(String details) {
+    _turnActive = false;
+    if (!_events.isClosed) {
+      _events.addError(StateError(details));
+    }
   }
 
   void _handleMessage(dynamic message) {

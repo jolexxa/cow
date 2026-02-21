@@ -385,6 +385,42 @@ class CowMlxBindings {
       >('cow_mlx_generate_next');
   late final _cow_mlx_generate_next = _cow_mlx_generate_nextPtr
       .asFunction<int Function(int, ffi.Pointer<ffi.Char>, int)>();
+
+  /// Get the number of tokens currently in the KV cache.
+  int cow_mlx_cache_token_count(int context) {
+    return _cow_mlx_cache_token_count(context);
+  }
+
+  late final _cow_mlx_cache_token_countPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Int32)>>(
+        'cow_mlx_cache_token_count',
+      );
+  late final _cow_mlx_cache_token_count = _cow_mlx_cache_token_countPtr
+      .asFunction<int Function(int)>();
+
+  /// Trim n tokens from the END of the KV cache.
+  int cow_mlx_cache_trim_end(int context, int n) {
+    return _cow_mlx_cache_trim_end(context, n);
+  }
+
+  late final _cow_mlx_cache_trim_endPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Int32, ffi.Int32)>>(
+        'cow_mlx_cache_trim_end',
+      );
+  late final _cow_mlx_cache_trim_end = _cow_mlx_cache_trim_endPtr
+      .asFunction<int Function(int, int)>();
+
+  /// Trim n tokens from the FRONT of the KV cache.
+  int cow_mlx_cache_trim_front(int context, int n) {
+    return _cow_mlx_cache_trim_front(context, n);
+  }
+
+  late final _cow_mlx_cache_trim_frontPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Int32, ffi.Int32)>>(
+        'cow_mlx_cache_trim_front',
+      );
+  late final _cow_mlx_cache_trim_front = _cow_mlx_cache_trim_frontPtr
+      .asFunction<int Function(int, int)>();
 }
 
 typedef cow_mlx_progress_fnFunction =

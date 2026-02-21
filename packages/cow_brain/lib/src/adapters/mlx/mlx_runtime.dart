@@ -4,6 +4,8 @@
 // handles stop-sequence detection and stream chunking.
 // ignore_for_file: public_member_api_docs
 
+import 'dart:convert';
+
 import 'package:cow_brain/src/adapters/inference_adapter.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_bindings.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_client.dart';
@@ -41,7 +43,6 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
   late final MlxHandles _handles;
 
   bool _disposed = false;
-  bool _bosApplied = false;
 
   @override
   int countTokens(String prompt, {required bool addBos}) {
@@ -49,7 +50,7 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
     final tokens = _client.tokenize(
       _handles,
       prompt,
-      addSpecial: addBos && !_bosApplied,
+      addSpecial: addBos,
     );
     return tokens.length;
   }
@@ -66,36 +67,86 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
 
     if (requiresReset) {
       _client.resetContext(_handles, _options.contextSize);
-      _bosApplied = false;
     }
 
+    // Tokenize the full prompt every time. The native side compares
+    // incoming tokens against its cached sequence to find the common
+    // prefix, trims diverged entries, and only prefills new tokens.
     final promptTokens = _client.tokenize(
       _handles,
       prompt,
-      addSpecial: addBos && !_bosApplied,
+      addSpecial: addBos,
     );
-    if (addBos) {
-      _bosApplied = true;
-    }
 
-    // Begin generation — prefills prompt and creates TokenIterator.
-    _client.generateBegin(_handles, promptTokens, _options.samplingOptions);
+    // Begin generation — native handles cache dedup internally.
+    _client.generateBegin(
+      _handles,
+      promptTokens,
+      _options.samplingOptions,
+    );
 
     final maxOutputTokens = _options.maxOutputTokensDefault;
     final assembler = StreamAssembler(stopSequences: stopSequences);
 
-    for (var i = 0; i < maxOutputTokens; i += 1) {
-      final piece = _client.generateNext(_handles);
+    // Chunked UTF-8 decoder — same pattern as LlamaCppRuntime.
+    // Raw token bytes from the native side may contain partial UTF-8
+    // sequences; the decoder buffers them until complete.
+    final decodedChunks = <String>[];
+    final chunkSink = StringConversionSink.fromStringSink(
+      _ChunkedStringSink(decodedChunks),
+    );
+    final byteSink = const Utf8Decoder(
+      allowMalformed: true,
+    ).startChunkedConversion(chunkSink);
 
-      // null means generation is done (EOG or max tokens).
-      if (piece == null) break;
+    try {
+      for (var i = 0; i < maxOutputTokens; i += 1) {
+        final bytes = _client.generateNext(_handles);
 
-      final chunk = assembler.addText(piece);
-      if (chunk != null) {
-        yield chunk;
-        await _asyncBoundary();
+        // null means generation is done (EOG or max tokens).
+        if (bytes == null) break;
+
+        if (bytes.isEmpty) {
+          final chunk = assembler.addEmptyToken();
+          if (chunk != null) {
+            yield chunk;
+            await _asyncBoundary();
+          }
+          continue;
+        }
+
+        byteSink.add(bytes);
+        if (decodedChunks.isEmpty) {
+          final chunk = assembler.addEmptyToken();
+          if (chunk != null) {
+            yield chunk;
+            await _asyncBoundary();
+          }
+          continue;
+        }
+
+        final piece = _drainDecodedChunks(decodedChunks);
+        if (piece.isEmpty) {
+          final chunk = assembler.addEmptyToken();
+          if (chunk != null) {
+            yield chunk;
+            await _asyncBoundary();
+          }
+          continue;
+        }
+
+        final chunk = assembler.addText(piece);
+        if (chunk != null) {
+          yield chunk;
+          await _asyncBoundary();
+        }
+        if (assembler.stopped) break;
       }
-      if (assembler.stopped) break;
+    } finally {
+      byteSink.close();
+      if (decodedChunks.isNotEmpty) {
+        assembler.appendPending(_drainDecodedChunks(decodedChunks));
+      }
     }
 
     for (final chunk in assembler.flush()) {
@@ -118,7 +169,6 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
   void reset() {
     _ensureNotDisposed();
     _client.resetContext(_handles, _options.contextSize);
-    _bosApplied = false;
   }
 
   void _ensureNotDisposed() {
@@ -128,4 +178,48 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
   }
 
   Future<void> _asyncBoundary() => Future<void>.delayed(Duration.zero);
+}
+
+String _drainDecodedChunks(List<String> decodedChunks) {
+  final piece = decodedChunks.length == 1
+      ? decodedChunks.removeAt(0)
+      : decodedChunks.join();
+  if (decodedChunks.isNotEmpty) {
+    decodedChunks.clear();
+  }
+  return piece;
+}
+
+final class _ChunkedStringSink implements StringSink {
+  _ChunkedStringSink(this._chunks);
+
+  final List<String> _chunks;
+
+  @override
+  void write(Object? obj) {
+    if (obj == null) return;
+    _chunks.add(obj.toString());
+  }
+
+  @override
+  void writeAll(Iterable<Object?> objects, [String separator = '']) {
+    var first = true;
+    for (final obj in objects) {
+      if (!first && separator.isNotEmpty) _chunks.add(separator);
+      first = false;
+      if (obj == null) continue;
+      _chunks.add(obj.toString());
+    }
+  }
+
+  @override
+  void writeCharCode(int charCode) {
+    _chunks.add(String.fromCharCode(charCode));
+  }
+
+  @override
+  void writeln([Object? obj = '']) {
+    if (obj != null && obj.toString().isNotEmpty) _chunks.add(obj.toString());
+    _chunks.add('\n');
+  }
 }

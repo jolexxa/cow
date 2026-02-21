@@ -97,5 +97,34 @@ void main() {
         ..addText('END');
       expect(assembler.stopped, isTrue);
     });
+
+    test('addText does not split supplementary-plane emoji', () {
+      // Guard length of 3 (stop sequence length 4 - 1).
+      // Feed 'ab\u{1F52E}' (4 code units: a, b, high surrogate, low surrogate).
+      // flushLength = 4 - 3 = 1 without the fix, which would be safe.
+      // But with 'a\u{1F52E}' (3 code units), flushLength = 3 - 3 = 0 (no flush).
+      // The tricky case: guard=1 (stop='XX', guardLength=1), text='a\u{1F52E}'.
+      // pending.length = 3, flushLength = 3 - 1 = 2.
+      // Code unit at index 1 is the HIGH surrogate (0xD83D).
+      // Without fix: substring(0,2) splits the pair!
+      final assembler = StreamAssembler(
+        stopSequences: ['XX'],
+      );
+
+      final chunk = assembler.addText('a\u{1F52E}');
+      expect(chunk, isNotNull);
+
+      // The visible text must contain the full emoji, not a lone surrogate.
+      final text = chunk!.text;
+      // Verify no lone surrogates: encoding to UTF-8 and back should roundtrip.
+      final encoded = text.runes.toList();
+      for (final rune in encoded) {
+        expect(rune, isNot(equals(0xFFFD)),
+            reason: 'Output contains U+FFFD replacement character');
+        expect(rune < 0xD800 || rune > 0xDFFF, isTrue,
+            reason: 'Output contains lone surrogate');
+      }
+      expect(text, contains('\u{1F52E}'));
+    });
   });
 }

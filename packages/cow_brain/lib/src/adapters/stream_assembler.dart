@@ -60,8 +60,15 @@ final class StreamAssembler {
       return null;
     }
 
-    final flushLength = _pending.length - _guardLength;
+    var flushLength = _pending.length - _guardLength;
     if (flushLength > 0) {
+      // Don't split a UTF-16 surrogate pair at the boundary.
+      if (flushLength < _pending.length) {
+        final lastUnit = _pending.codeUnitAt(flushLength - 1);
+        if (lastUnit >= 0xD800 && lastUnit <= 0xDBFF) {
+          flushLength += 1;
+        }
+      }
       final visible = _pending.substring(0, flushLength);
       _pending = _pending.substring(flushLength);
       if (visible.isNotEmpty) {

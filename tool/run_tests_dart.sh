@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 packages=(
-  .
+  packages/cow
   packages/collections
   packages/blocterm
   packages/cow_brain

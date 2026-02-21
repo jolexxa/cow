@@ -19,3 +19,17 @@ Good code has...
 To avoid sibling dependencies, state must either be lifted up to a common ancestor and passed down, or pushed down and subscribed to.
 
 See CONTRIBUTING.md for development details.
+
+# Developer Scripts
+
+All scripts are in `./tool/` and accept an optional package name (e.g., `cow_brain`, `blocterm`).
+
+```bash
+tool/test.sh [pkg]         # run Dart tests (one or all)
+tool/analyze.sh [pkg]      # dart analyze --fatal-infos
+tool/format.sh [pkg]       # dart format (add --check for CI mode)
+tool/coverage.sh [pkg]     # tests + lcov coverage report
+tool/codegen.sh [pkg]      # build_runner for JSON serialization
+tool/build_mlx.sh          # build CowMLX Swift library
+tool/checks.sh             # full CI check (format → analyze → build → test → coverage)
+```

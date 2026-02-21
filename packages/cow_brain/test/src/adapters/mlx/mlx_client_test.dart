@@ -397,16 +397,16 @@ void main() {
       expect(bindings.generateNextCalls, 1);
     });
 
-    test('returns empty string when bindings return 0 (incomplete char)', () {
+    test('returns empty list when bindings return 0 (control token)', () {
       bindings.generateNextImpl = (ctx, buf, bufLen) => 0;
 
       final client = _client();
       final handles = _handles(bindings, contextHandle: 3);
 
-      expect(client.generateNext(handles), '');
+      expect(client.generateNext(handles), const <int>[]);
     });
 
-    test('returns decoded text when bindings write bytes to buffer', () {
+    test('returns raw bytes when bindings write bytes to buffer', () {
       bindings.generateNextImpl = (ctx, buf, bufLen) {
         final bytes = utf8.encode('Hi');
         final ptr = buf.cast<Uint8>();
@@ -419,7 +419,7 @@ void main() {
       final client = _client();
       final handles = _handles(bindings, contextHandle: 3);
 
-      expect(client.generateNext(handles), 'Hi');
+      expect(client.generateNext(handles), utf8.encode('Hi'));
     });
 
     test('retries with larger buffer when bindings return < -1', () {
@@ -444,7 +444,7 @@ void main() {
 
       final result = client.generateNext(handles);
 
-      expect(result, 'Hello!');
+      expect(result, utf8.encode('Hello!'));
       expect(bindings.generateNextCalls, 2);
     });
 

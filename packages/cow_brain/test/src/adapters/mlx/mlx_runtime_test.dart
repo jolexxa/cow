@@ -1,6 +1,8 @@
 // Tests for MlxRuntime.
 // ignore_for_file: cascade_invocations
 
+import 'dart:convert';
+
 import 'package:cow_brain/src/adapters/mlx/mlx_client.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_handles.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_runtime.dart';
@@ -79,7 +81,12 @@ void main() {
     test('generate streams text chunks from generateNext queue', () async {
       final bindings = FakeMlxBindings();
       final client = _FakeMlxClient()
-        ..generateNextQueue.addAll(['Hello', ', ', 'world', null]);
+        ..generateNextQueue.addAll([
+          utf8.encode('Hello'),
+          utf8.encode(', '),
+          utf8.encode('world'),
+          null,
+        ]);
 
       final runtime = _makeRuntime(client, bindings);
 
@@ -100,7 +107,11 @@ void main() {
     test('generate stops on null (EOG)', () async {
       final bindings = FakeMlxBindings();
       final client = _FakeMlxClient()
-        ..generateNextQueue.addAll(['tok1', null, 'tok2']);
+        ..generateNextQueue.addAll([
+          utf8.encode('tok1'),
+          null,
+          utf8.encode('tok2'),
+        ]);
 
       final runtime = _makeRuntime(client, bindings);
 
@@ -122,7 +133,11 @@ void main() {
     test('generate stops on stop sequence', () async {
       final bindings = FakeMlxBindings();
       final client = _FakeMlxClient()
-        ..generateNextQueue.addAll(['Hi', '<|end|>', 'more text']);
+        ..generateNextQueue.addAll([
+          utf8.encode('Hi'),
+          utf8.encode('<|end|>'),
+          utf8.encode('more text'),
+        ]);
 
       final runtime = _makeRuntime(client, bindings);
 
@@ -185,7 +200,7 @@ void main() {
       final bindings = FakeMlxBindings();
       // Use a stop sequence long enough that text won't flush until end.
       final client = _FakeMlxClient()
-        ..generateNextQueue.addAll(['partial', null]);
+        ..generateNextQueue.addAll([utf8.encode('partial'), null]);
 
       final runtime = _makeRuntime(client, bindings);
 
@@ -204,14 +219,14 @@ void main() {
     });
 
     test(
-      'BOS tracking — first call gets addSpecial=true, subsequent false',
+      'generate always tokenizes with addSpecial for cache alignment',
       () async {
         final bindings = FakeMlxBindings();
         final client = _FakeMlxClient()..generateNextQueue.add(null);
 
         final runtime = _makeRuntime(client, bindings);
 
-        // First generate with addBos=true — should pass addSpecial=true.
+        // First generate with addBos=true.
         await runtime
             .generate(
               prompt: 'first',
@@ -224,8 +239,8 @@ void main() {
 
         client.generateNextQueue.add(null);
 
-        // Second generate with addBos=true — BOS already applied, should
-        // be false.
+        // Second generate — still addSpecial=true so token positions
+        // align with the KV cache (which starts with BOS from gen 1).
         await runtime
             .generate(
               prompt: 'second',
@@ -236,7 +251,7 @@ void main() {
             )
             .toList();
 
-        expect(client.addSpecialCalls, [true, false]);
+        expect(client.addSpecialCalls, [true, true]);
       },
     );
 
@@ -319,6 +334,128 @@ void main() {
       );
     });
   });
+
+  group('incremental generation & KV cache', () {
+    test(
+      'incremental generation without reset does not call resetContext',
+      () async {
+        final bindings = FakeMlxBindings();
+        final client = _FakeMlxClient()
+          ..generateNextQueue.addAll([null, null]);
+
+        final runtime = _makeRuntime(client, bindings);
+
+        // First generate.
+        await runtime
+            .generate(
+              prompt: 'first',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        // Second generate — incremental, no reset.
+        await runtime
+            .generate(
+              prompt: 'second',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 1,
+            )
+            .toList();
+
+        expect(client.resetContextCalls, 0);
+        // Both calls get addSpecial=true for KV cache alignment.
+        expect(client.addSpecialCalls, [true, true]);
+      },
+    );
+
+    test(
+      'reset between generations calls resetContext and re-sends BOS',
+      () async {
+        final bindings = FakeMlxBindings();
+        final client = _FakeMlxClient()
+          ..generateNextQueue.addAll([null, null]);
+
+        final runtime = _makeRuntime(client, bindings);
+
+        // First generate — no reset.
+        await runtime
+            .generate(
+              prompt: 'first',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        // Second generate — with reset.
+        await runtime
+            .generate(
+              prompt: 'second',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: true,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        expect(client.resetContextCalls, 1);
+        // BOS re-sent after reset.
+        expect(client.addSpecialCalls, [true, true]);
+      },
+    );
+
+    test('three sequential generations always tokenize with BOS', () async {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient()
+        ..generateNextQueue.addAll([null, null, null]);
+
+      final runtime = _makeRuntime(client, bindings);
+
+      // gen1: first call.
+      await runtime
+          .generate(
+            prompt: 'first',
+            stopSequences: const [],
+            addBos: true,
+            requiresReset: false,
+            reusePrefixMessageCount: 0,
+          )
+          .toList();
+
+      // gen2: incremental — still addSpecial=true for cache alignment.
+      await runtime
+          .generate(
+            prompt: 'second',
+            stopSequences: const [],
+            addBos: true,
+            requiresReset: false,
+            reusePrefixMessageCount: 1,
+          )
+          .toList();
+
+      // gen3: reset — addSpecial=true as always.
+      await runtime
+          .generate(
+            prompt: 'third',
+            stopSequences: const [],
+            addBos: true,
+            requiresReset: true,
+            reusePrefixMessageCount: 0,
+          )
+          .toList();
+
+      // All three always get addSpecial=true for KV cache alignment.
+      expect(client.addSpecialCalls, [true, true, true]);
+      expect(client.resetContextCalls, 1);
+    });
+
+  });
 }
 
 final class _FakeMlxClient implements MlxClientApi {
@@ -332,8 +469,8 @@ final class _FakeMlxClient implements MlxClientApi {
   int generateBeginCalls = 0;
   int disposeCalls = 0;
 
-  // Queue of strings to return from generateNext. null = done.
-  final List<String?> generateNextQueue = [];
+  // Queue of byte lists to return from generateNext. null = done.
+  final List<List<int>?> generateNextQueue = [];
   int generateNextCalls = 0;
 
   @override
@@ -370,7 +507,7 @@ final class _FakeMlxClient implements MlxClientApi {
   }
 
   @override
-  String? generateNext(MlxHandles handles, {int bufferSize = 256}) {
+  List<int>? generateNext(MlxHandles handles, {int bufferSize = 256}) {
     generateNextCalls++;
     if (generateNextQueue.isEmpty) return null;
     return generateNextQueue.removeAt(0);

@@ -1,6 +1,7 @@
 {
   "words": [
     "agentic",
+    "Awni",
     "bfloat",
     "blas",
     "blocterm",
@@ -29,6 +30,7 @@
     "libllama",
     "libmlx",
     "libname",
+    "linalg",
     "logit",
     "logits",
     "lstrip",
@@ -39,6 +41,7 @@
     "Mlock",
     "MLXLLM",
     "MLXLM",
+    "MLXNN",
     "nevermatches",
     "Nocterm",
     "nothink",
@@ -76,6 +79,6 @@
     "**/build/**/*.*",
     "packages/llama_cpp_dart/**/*.*",
     "**/coverage/**",
-    "**/external/**",
+    "**/external/**"
   ]
 }
