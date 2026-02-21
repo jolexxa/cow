@@ -68,6 +68,15 @@ final class FakeMlxBindings implements MlxBindings {
   int generateBeginCalls = 0;
   int generateNextCalls = 0;
 
+  // -- Cache tracking --
+
+  int cacheTrimEndResult = 0;
+  int cacheTrimFrontResult = 0;
+  int cacheTrimEndCalls = 0;
+  int cacheTrimFrontCalls = 0;
+  int? lastCacheTrimEndN;
+  int? lastCacheTrimFrontN;
+
   // -- Last call arguments --
 
   List<int>? lastGenerateBeginTokens;
@@ -220,5 +229,19 @@ final class FakeMlxBindings implements MlxBindings {
     }
     // Default: return -1 (done).
     return -1;
+  }
+
+  @override
+  int cacheTrimEnd(int contextHandle, int n) {
+    cacheTrimEndCalls++;
+    lastCacheTrimEndN = n;
+    return cacheTrimEndResult;
+  }
+
+  @override
+  int cacheTrimFront(int contextHandle, int n) {
+    cacheTrimFrontCalls++;
+    lastCacheTrimFrontN = n;
+    return cacheTrimFrontResult;
   }
 }

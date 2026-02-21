@@ -22,9 +22,10 @@ struct CustomSampler: LogitSampler {
         self.topP = topP
         self.topK = topK
         self.minP = minP
-        self.randomState = MLXRandom.RandomState()
         if seed != 0 {
-            MLXRandom.seed(UInt64(seed))
+            self.randomState = MLXRandom.RandomState(seed: UInt64(seed))
+        } else {
+            self.randomState = MLXRandom.RandomState()
         }
     }
 
@@ -44,7 +45,8 @@ struct CustomSampler: LogitSampler {
             let vocabSize = logits.dim(-1)
             let k = min(topK, vocabSize)
             let sorted = MLX.sorted(logits, axis: -1)
-            let threshold = sorted[vocabSize - k]
+            // Index the vocab axis (last), not the batch axis.
+            let threshold = sorted[0..., vocabSize - k]
             logits = MLX.where(logits .>= threshold, logits, MLXArray(Float(-1e9)))
         }
 

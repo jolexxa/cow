@@ -12,6 +12,10 @@ let package = Package(
             url: "https://github.com/ml-explore/mlx-swift-lm",
             branch: "main"
         ),
+        .package(
+            url: "https://github.com/ml-explore/mlx-swift",
+            from: "0.30.6"
+        ),
     ],
     targets: [
         .target(
@@ -26,6 +30,15 @@ let package = Package(
                 .linkedFramework("Metal"),
                 .linkedFramework("Accelerate"),
             ]
+        ),
+        .testTarget(
+            name: "CowMLXTests",
+            dependencies: [
+                "CowMLX",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+            ],
+            path: "Tests/CowMLXTests"
         ),
     ]
 )

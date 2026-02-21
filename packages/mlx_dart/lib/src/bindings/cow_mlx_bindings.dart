@@ -74,11 +74,7 @@ class CowMlxBindings {
     cow_mlx_progress_fn progress_cb,
     ffi.Pointer<ffi.Void> user_data,
   ) {
-    return _cow_mlx_load_model(
-      model_path,
-      progress_cb,
-      user_data,
-    );
+    return _cow_mlx_load_model(model_path, progress_cb, user_data);
   }
 
   late final _cow_mlx_load_modelPtr =
@@ -101,12 +97,8 @@ class CowMlxBindings {
       >();
 
   /// Free a loaded model. Invalidates the handle.
-  void cow_mlx_free_model(
-    int model,
-  ) {
-    return _cow_mlx_free_model(
-      model,
-    );
+  void cow_mlx_free_model(int model) {
+    return _cow_mlx_free_model(model);
   }
 
   late final _cow_mlx_free_modelPtr =
@@ -119,12 +111,8 @@ class CowMlxBindings {
   /// Get a shareable integer ID for a model handle.
   /// This ID can be sent to another Dart isolate and used with
   /// cow_mlx_model_from_id to reconstruct the handle.
-  int cow_mlx_model_get_id(
-    int model,
-  ) {
-    return _cow_mlx_model_get_id(
-      model,
-    );
+  int cow_mlx_model_get_id(int model) {
+    return _cow_mlx_model_get_id(model);
   }
 
   late final _cow_mlx_model_get_idPtr =
@@ -137,12 +125,8 @@ class CowMlxBindings {
   /// Reconstruct a model handle from an ID obtained via cow_mlx_model_get_id.
   /// The model must still be alive (not freed).
   /// Returns COW_MLX_INVALID_HANDLE if the ID is unknown.
-  int cow_mlx_model_from_id(
-    int model_id,
-  ) {
-    return _cow_mlx_model_from_id(
-      model_id,
-    );
+  int cow_mlx_model_from_id(int model_id) {
+    return _cow_mlx_model_from_id(model_id);
   }
 
   late final _cow_mlx_model_from_idPtr =
@@ -156,14 +140,8 @@ class CowMlxBindings {
   /// @param model Model handle.
   /// @param max_tokens Maximum context window size (0 = model default).
   /// @return Context handle, or COW_MLX_INVALID_HANDLE on failure.
-  int cow_mlx_create_context(
-    int model,
-    int max_tokens,
-  ) {
-    return _cow_mlx_create_context(
-      model,
-      max_tokens,
-    );
+  int cow_mlx_create_context(int model, int max_tokens) {
+    return _cow_mlx_create_context(model, max_tokens);
   }
 
   late final _cow_mlx_create_contextPtr =
@@ -174,12 +152,8 @@ class CowMlxBindings {
       .asFunction<int Function(int, int)>();
 
   /// Free a context. Invalidates the handle.
-  void cow_mlx_free_context(
-    int context,
-  ) {
-    return _cow_mlx_free_context(
-      context,
-    );
+  void cow_mlx_free_context(int context) {
+    return _cow_mlx_free_context(context);
   }
 
   late final _cow_mlx_free_contextPtr =
@@ -191,12 +165,8 @@ class CowMlxBindings {
 
   /// Reset context state (clears iterator, detokenizer, and stop tokens).
   /// @return true on success.
-  bool cow_mlx_reset_context(
-    int context,
-  ) {
-    return _cow_mlx_reset_context(
-      context,
-    );
+  bool cow_mlx_reset_context(int context) {
+    return _cow_mlx_reset_context(context);
   }
 
   late final _cow_mlx_reset_contextPtr =
@@ -259,14 +229,8 @@ class CowMlxBindings {
       >();
 
   /// Check if a token is an end-of-generation token.
-  bool cow_mlx_is_eog(
-    int model,
-    int token,
-  ) {
-    return _cow_mlx_is_eog(
-      model,
-      token,
-    );
+  bool cow_mlx_is_eog(int model, int token) {
+    return _cow_mlx_is_eog(model, token);
   }
 
   late final _cow_mlx_is_eogPtr =
@@ -370,11 +334,7 @@ class CowMlxBindings {
     ffi.Pointer<ffi.Char> buf,
     int buf_len,
   ) {
-    return _cow_mlx_generate_next(
-      context,
-      buf,
-      buf_len,
-    );
+    return _cow_mlx_generate_next(context, buf, buf_len);
   }
 
   late final _cow_mlx_generate_nextPtr =
@@ -385,6 +345,42 @@ class CowMlxBindings {
       >('cow_mlx_generate_next');
   late final _cow_mlx_generate_next = _cow_mlx_generate_nextPtr
       .asFunction<int Function(int, ffi.Pointer<ffi.Char>, int)>();
+
+  /// Get the number of tokens currently in the KV cache.
+  int cow_mlx_cache_token_count(int context) {
+    return _cow_mlx_cache_token_count(context);
+  }
+
+  late final _cow_mlx_cache_token_countPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Int32)>>(
+        'cow_mlx_cache_token_count',
+      );
+  late final _cow_mlx_cache_token_count = _cow_mlx_cache_token_countPtr
+      .asFunction<int Function(int)>();
+
+  /// Trim n tokens from the END of the KV cache.
+  int cow_mlx_cache_trim_end(int context, int n) {
+    return _cow_mlx_cache_trim_end(context, n);
+  }
+
+  late final _cow_mlx_cache_trim_endPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Int32, ffi.Int32)>>(
+        'cow_mlx_cache_trim_end',
+      );
+  late final _cow_mlx_cache_trim_end = _cow_mlx_cache_trim_endPtr
+      .asFunction<int Function(int, int)>();
+
+  /// Trim n tokens from the FRONT of the KV cache.
+  int cow_mlx_cache_trim_front(int context, int n) {
+    return _cow_mlx_cache_trim_front(context, n);
+  }
+
+  late final _cow_mlx_cache_trim_frontPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Int32, ffi.Int32)>>(
+        'cow_mlx_cache_trim_front',
+      );
+  late final _cow_mlx_cache_trim_front = _cow_mlx_cache_trim_frontPtr
+      .asFunction<int Function(int, int)>();
 }
 
 typedef cow_mlx_progress_fnFunction =

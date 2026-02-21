@@ -8,7 +8,7 @@ environment:
 
 dependencies:
   bloc: ^8.1.4
-  nocterm: ^0.4.4
+  nocterm: ^0.5.1
 
 dev_dependencies:
   mocktail: ^1.0.4

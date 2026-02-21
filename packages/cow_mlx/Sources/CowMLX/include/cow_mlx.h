@@ -117,6 +117,10 @@ bool cow_mlx_is_eog(int32_t model, int32_t token);
 /// Internally creates a TokenIterator (from MLXLMCommon) which handles
 /// prefill, KV cache management, and asyncEval GPU pipelining.
 ///
+/// The native side compares incoming tokens against the cached token
+/// sequence to find the common prefix. Only tokens after the prefix
+/// are prefilled, and the cache is trimmed if it diverged.
+///
 /// Sampling parameters are passed as individual arguments:
 /// @param context Context handle.
 /// @param tokens Array of prompt token IDs.
@@ -159,6 +163,20 @@ int32_t cow_mlx_generate_next(
     char* buf,
     int32_t buf_len
 );
+
+// ---------- KV Cache Management ----------
+
+/// Get the number of tokens currently cached in the KV cache.
+/// Returns -1 on error (invalid handle).
+int32_t cow_mlx_cache_token_count(int32_t context);
+
+/// Trim n tokens from the END of the KV cache (undo).
+/// Returns actual number of tokens trimmed, or -1 on error.
+int32_t cow_mlx_cache_trim_end(int32_t context, int32_t n);
+
+/// Trim n tokens from the FRONT of the KV cache (sliding window eviction).
+/// Returns actual number of tokens trimmed, or -1 on error.
+int32_t cow_mlx_cache_trim_front(int32_t context, int32_t n);
 
 #ifdef __cplusplus
 }

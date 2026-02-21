@@ -1,7 +1,7 @@
 import Foundation
 @preconcurrency import MLX
-import MLXLMCommon
 import MLXLLM
+import MLXLMCommon
 import Tokenizers
 
 // MARK: - Global State
@@ -13,33 +13,45 @@ private let contexts = HandleRegistry<CowMLXContext>()
 nonisolated(unsafe) private var modelIdMap: [Int64: Int32] = [:]
 private let modelIdMapLock = NSLock()
 
-/// Dedicated queue for bridging Swift async → synchronous C calls.
-/// This MUST be different from the Swift cooperative thread pool to avoid
-/// deadlocks when blocking with a semaphore.
-private let mlxQueue = DispatchQueue(label: "com.cow.mlx", qos: .userInitiated)
+/// Serializes model loading. LLMModelFactory is NOT thread-safe
+/// (weight loading happens outside MLX's evalLock).
+private let modelLoadLock = NSLock()
 
-// MARK: - Async Bridging
+// MARK: - Bridging Helpers
 
-/// Run an async closure synchronously by dispatching to mlxQueue and blocking
-/// the calling thread with a semaphore.
+/// Bridge sync FFI → async Swift. Spawns a Task, blocks the caller with
+/// a semaphore until it completes.
 private func runBlocking<T>(_ body: @escaping @Sendable () async throws -> T) throws -> T {
-    let sem = DispatchSemaphore(value: 0)
-    nonisolated(unsafe) var result: Result<T, Error>?
-
-    mlxQueue.async {
-        Task {
-            do {
-                let value = try await body()
-                result = .success(value)
-            } catch {
-                result = .failure(error)
-            }
-            sem.signal()
+    let box = ResultBox<T>()
+    Task {
+        do {
+            let value = try await body()
+            box.set(.success(value))
+        } catch {
+            box.set(.failure(error))
         }
     }
+    box.wait()
+    return try box.get()
+}
 
-    sem.wait()
-    return try result!.get()
+/// Thread-safe box for passing a result from a Task back to the blocked caller.
+private final class ResultBox<T>: @unchecked Sendable {
+    private let sem = DispatchSemaphore(value: 0)
+    private var result: Result<T, Error>?
+
+    func set(_ value: Result<T, Error>) {
+        result = value
+        sem.signal()
+    }
+
+    func wait() {
+        sem.wait()
+    }
+
+    func get() throws -> T {
+        try result!.get()
+    }
 }
 
 // MARK: - Error Reporting
@@ -53,7 +65,12 @@ public func cow_mlx_get_error() -> UnsafePointer<CChar>? {
 
 @_cdecl("cow_mlx_init")
 public func cow_mlx_init() -> Bool {
-    // MLX manages GPU memory internally.
+    // Cap the Metal buffer cache at 32 MB. MLX keeps freed intermediate
+    // buffers in a pool for reuse, but as the KV cache grows each turn
+    // the buffer sizes change so old ones can't be reused — they just
+    // pile up. Without a limit this can grow to several GB.
+    // 32 MB is generous enough for buffer reuse without runaway growth.
+    Memory.cacheLimit = 32 * 1024 * 1024
     ErrorState.clear()
     return true
 }
@@ -79,10 +96,17 @@ public func cow_mlx_load_model(
     let path = String(cString: modelPath)
     let directoryURL = URL(fileURLWithPath: path)
 
+    // Detect tokenizer byte decoding strategy from tokenizer.json.
+    let decoderType = detectDecoderType(modelDirectory: directoryURL)
+
     // Wrap raw pointer for Sendable crossing.
     nonisolated(unsafe) let userDataSafe = userData
 
     do {
+        // LLMModelFactory is not thread-safe — serialize loading.
+        modelLoadLock.lock()
+        defer { modelLoadLock.unlock() }
+
         let (container, config) = try runBlocking {
             let config = ModelConfiguration(directory: directoryURL)
             let container = try await LLMModelFactory.shared.loadContainer(
@@ -104,6 +128,13 @@ public func cow_mlx_load_model(
             container: container,
             configuration: config
         )
+        model.decoderType = decoderType
+
+        // Cache the tokenizer for synchronous access in tokenize/is_eog.
+        model.cachedTokenizer = try runBlocking {
+            await container.tokenizer
+        }
+
         let handle = models.insert(model)
 
         modelIdMapLock.lock()
@@ -187,69 +218,49 @@ public func cow_mlx_tokenize(
         ErrorState.set("text is NULL")
         return -1
     }
-
-    let str = String(cString: text)
-
-    do {
-        let tokens: [Int] = try runBlocking {
-            let tokenizer = await m.container.tokenizer
-            return tokenizer.encode(text: str, addSpecialTokens: addSpecial)
-        }
-
-        let count = Int32(tokens.count)
-
-        // If outTokens is NULL, just return the count.
-        guard let outTokens else {
-            return count
-        }
-
-        if count > maxTokens {
-            // Buffer too small — return negative required size.
-            return -count
-        }
-
-        for (i, tok) in tokens.enumerated() {
-            outTokens[i] = Int32(tok)
-        }
-
-        ErrorState.clear()
-        return count
-    } catch {
-        ErrorState.set("Tokenization failed: \(error)")
+    guard let tokenizer = m.cachedTokenizer else {
+        ErrorState.set("Tokenizer not cached — model not fully loaded")
         return -1
     }
+
+    let str = String(cString: text)
+    let tokens = tokenizer.encode(text: str, addSpecialTokens: addSpecial)
+    let count = Int32(tokens.count)
+
+    // If outTokens is NULL, just return the count.
+    guard let outTokens else {
+        return count
+    }
+
+    if count > maxTokens {
+        // Buffer too small — return negative required size.
+        return -count
+    }
+
+    for (i, tok) in tokens.enumerated() {
+        outTokens[i] = Int32(tok)
+    }
+
+    ErrorState.clear()
+    return count
 }
 
 @_cdecl("cow_mlx_is_eog")
 public func cow_mlx_is_eog(_ model: Int32, _ token: Int32) -> Bool {
     guard let m = models.get(model) else { return false }
+    guard let tokenizer = m.cachedTokenizer else { return false }
 
-    do {
-        return try runBlocking {
-            let tokenizer = await m.container.tokenizer
-            // Check against EOS token ID.
-            if let eosId = tokenizer.eosTokenId, eosId == Int(token) {
-                return true
-            }
-            // Check against extra EOS tokens from configuration.
-            if m.configuration.eosTokenIds.contains(Int(token)) {
-                return true
-            }
-            return false
-        }
-    } catch {
-        return false
+    if let eosId = tokenizer.eosTokenId, eosId == Int(token) {
+        return true
     }
+    if m.configuration.eosTokenIds.contains(Int(token)) {
+        return true
+    }
+    return false
 }
 
 // MARK: - Generation
 
-/// Begin a generation session. Tokenizes the prompt, creates the
-/// `TokenIterator` (which does prefill internally), and stores the
-/// iterator + detokenizer on the context.
-///
-/// Sampling parameters are passed as individual C arguments to avoid
-/// a struct parameter (simpler FFI).
 @_cdecl("cow_mlx_generate_begin")
 public func cow_mlx_generate_begin(
     _ context: Int32,
@@ -277,11 +288,29 @@ public func cow_mlx_generate_begin(
     do {
         try runBlocking {
             try await ctx.model.container.perform { modelContext in
-                // Build the LMInput from token IDs.
-                let inputTokens = MLXArray(tokenArray)
+                let prefixLen = zip(tokenArray, ctx.cachedTokens)
+                    .prefix(while: ==).count
+
+                let cache: [KVCache]
+                if prefixLen > 0, let existing = ctx.cache {
+                    let tokensToTrim = ctx.cachedTokens.count - prefixLen
+                    if tokensToTrim > 0 {
+                        for c in existing { c.trim(tokensToTrim) }
+                    }
+                    cache = existing
+                } else {
+                    cache = modelContext.model.newCache(parameters: nil)
+                }
+
+                let newTokens: [Int]
+                if prefixLen < tokenArray.count {
+                    newTokens = Array(tokenArray[prefixLen...])
+                } else {
+                    newTokens = [tokenArray.last!]
+                }
+                let inputTokens = MLXArray(newTokens)
                 let input = LMInput(tokens: inputTokens)
 
-                // Create our custom sampler (topK + minP + topP + temperature).
                 let sampler = CustomSampler(
                     temperature: temperature,
                     topP: topP,
@@ -290,7 +319,6 @@ public func cow_mlx_generate_begin(
                     seed: Int(seed)
                 )
 
-                // Use Apple's RepetitionContext for repeat penalty if enabled.
                 var processor: LogitProcessor? = nil
                 if repeatPenalty > 1.0 && repeatWindow > 0 {
                     processor = RepetitionContext(
@@ -299,25 +327,26 @@ public func cow_mlx_generate_begin(
                     )
                 }
 
-                // Create the TokenIterator — this does prefill + first sample
-                // internally, using asyncEval for GPU pipelining.
-                let maxKVSize = ctx.maxTokens > 0 ? Int(ctx.maxTokens) : nil
-                let cache = modelContext.model.newCache(
-                    parameters: GenerateParameters(maxKVSize: maxKVSize)
-                )
-
                 let iterator = try TokenIterator(
                     input: input,
                     model: modelContext.model,
                     cache: cache,
                     processor: processor,
                     sampler: sampler,
-                    prefillStepSize: 512
+                    // Empirical testing for prefill step size on common
+                    // macOS hardware is available here:
+                    // https://github.com/thornad/lmstudio-mlx-patch
+                    // https://github.com/lmstudio-ai/lmstudio-js/issues/507
+                    //
+                    // A higher number helps reduce warmup time to first token
+                    // at the expense of memory usage.
+                    prefillStepSize: 4096
                 )
 
                 ctx.iteratorBox = TokenIteratorBox(iterator)
+                ctx.cache = cache
+                ctx.cachedTokens = tokenArray
 
-                // Build the stop-token set.
                 var stopIds = modelContext.configuration.eosTokenIds
                 if let eosId = modelContext.tokenizer.eosTokenId {
                     stopIds.insert(eosId)
@@ -328,11 +357,6 @@ public func cow_mlx_generate_begin(
                     }
                 }
                 ctx.stopTokenIds = stopIds
-
-                // Create the streaming detokenizer.
-                ctx.detokenizer = NaiveStreamingDetokenizer(
-                    tokenizer: modelContext.tokenizer
-                )
             }
         }
 
@@ -344,14 +368,6 @@ public func cow_mlx_generate_begin(
     }
 }
 
-/// Advance generation by one token. Returns the new text (if any)
-/// produced by the streaming detokenizer.
-///
-/// - Returns: Number of UTF-8 bytes written to `buf`.
-///   - `> 0`: text available.
-///   - `0`: token produced an incomplete character (e.g. partial emoji).
-///   - `-1`: generation is done (EOG or iterator exhausted).
-///   - `< -1`: buffer too small (absolute value = required size).
 @_cdecl("cow_mlx_generate_next")
 public func cow_mlx_generate_next(
     _ context: Int32,
@@ -367,46 +383,84 @@ public func cow_mlx_generate_next(
         return -1
     }
 
-    // TokenIterator.next() is synchronous — no runBlocking needed.
-    // Model weights are read-only after prefill; KV cache is owned
-    // by the iterator.
-    guard let token = box.iterator.next() else {
-        // Iterator exhausted (max tokens reached).
-        ErrorState.clear()
-        return -1
-    }
+    // Wrap raw pointer for Sendable crossing.
+    nonisolated(unsafe) let bufSafe = buf
 
-    // Check for end-of-generation tokens.
-    if ctx.stopTokenIds.contains(token) {
-        ErrorState.clear()
-        return -1
-    }
+    do {
+        return try runBlocking {
+            guard let token = box.iterator.next() else {
+                ErrorState.clear()
+                return Int32(-1)
+            }
 
-    // Feed token into the streaming detokenizer.
-    ctx.detokenizer?.append(token: token)
-    guard let text = ctx.detokenizer?.next(), !text.isEmpty else {
-        // Incomplete character — return 0 bytes.
-        ErrorState.clear()
-        return 0
-    }
+            if ctx.stopTokenIds.contains(token) {
+                ErrorState.clear()
+                return Int32(-1)
+            }
 
-    let utf8 = Array(text.utf8)
-    let count = Int32(utf8.count)
+            // Get the raw token string from the vocabulary and convert
+            // to raw bytes via the GPT-2 byte decoder table. Dart will
+            // handle UTF-8 reassembly via its chunked Utf8Decoder.
+            guard let tokenizer = ctx.model.cachedTokenizer,
+                  let tokenString = tokenizer.convertIdToToken(token) else {
+                ErrorState.clear()
+                return Int32(0)
+            }
 
-    guard let buf else {
-        return count
-    }
+            let bytes = tokenStringToBytes(tokenString, decoderType: ctx.model.decoderType)
+            let count = Int32(bytes.count)
 
-    if count > bufLen {
-        return -count
-    }
+            guard count > 0 else {
+                ErrorState.clear()
+                return Int32(0)
+            }
 
-    utf8.withUnsafeBufferPointer { src in
-        for i in 0..<Int(count) {
-            buf[i] = CChar(bitPattern: src[i])
+            guard let bufSafe else {
+                return count
+            }
+
+            if count > bufLen {
+                return -count
+            }
+
+            for i in 0..<Int(count) {
+                bufSafe[i] = CChar(bitPattern: bytes[i])
+            }
+
+            ErrorState.clear()
+            return count
         }
+    } catch {
+        ErrorState.set("generate_next failed: \(error)")
+        return -1
     }
+}
 
-    ErrorState.clear()
-    return count
+// MARK: - KV Cache Management
+
+@_cdecl("cow_mlx_cache_token_count")
+public func cow_mlx_cache_token_count(_ context: Int32) -> Int32 {
+    guard let ctx = contexts.get(context) else {
+        ErrorState.set("Invalid context handle")
+        return -1
+    }
+    return Int32(ctx.cache?.first?.offset ?? 0)
+}
+
+@_cdecl("cow_mlx_cache_trim_end")
+public func cow_mlx_cache_trim_end(_ context: Int32, _ n: Int32) -> Int32 {
+    guard let ctx = contexts.get(context) else {
+        ErrorState.set("Invalid context handle")
+        return -1
+    }
+    return Int32(ctx.trimCacheEnd(Int(n)))
+}
+
+@_cdecl("cow_mlx_cache_trim_front")
+public func cow_mlx_cache_trim_front(_ context: Int32, _ n: Int32) -> Int32 {
+    guard let ctx = contexts.get(context) else {
+        ErrorState.set("Invalid context handle")
+        return -1
+    }
+    return Int32(ctx.trimCacheFront(Int(n)))
 }

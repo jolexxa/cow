@@ -100,10 +100,13 @@ Future<String> _resolveReleaseTag() async {
     'llama.cpp',
   );
   try {
-    final exact = await _runProcess(
-      'git',
-      ['-C', llamaDir, 'describe', '--tags', '--exact-match'],
-    );
+    final exact = await _runProcess('git', [
+      '-C',
+      llamaDir,
+      'describe',
+      '--tags',
+      '--exact-match',
+    ]);
     final stdoutText = exact.stdout is String ? exact.stdout as String : '';
     final tag = stdoutText.trim();
     if (tag.isNotEmpty) {

@@ -57,6 +57,9 @@ abstract class MlxBindings {
     Pointer<Utf8> buf,
     int bufLen,
   );
+
+  int cacheTrimEnd(int contextHandle, int n);
+  int cacheTrimFront(int contextHandle, int n);
 }
 
 /// Concrete adapter delegating to [CowMlxBindings].
@@ -159,6 +162,14 @@ final class MlxBindingsAdapter implements MlxBindings {
     Pointer<Utf8> buf,
     int bufLen,
   ) => _ffi.cow_mlx_generate_next(contextHandle, buf.cast(), bufLen);
+
+  @override
+  int cacheTrimEnd(int contextHandle, int n) =>
+      _ffi.cow_mlx_cache_trim_end(contextHandle, n);
+
+  @override
+  int cacheTrimFront(int contextHandle, int n) =>
+      _ffi.cow_mlx_cache_trim_front(contextHandle, n);
 }
 
 // coverage:ignore-end

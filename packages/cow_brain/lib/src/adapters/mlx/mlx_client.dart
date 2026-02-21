@@ -33,15 +33,20 @@ abstract class MlxClientApi {
 
   /// Begin a generation session — prefills the prompt and creates
   /// the TokenIterator on the native side.
+  ///
+  /// The native side compares incoming tokens against the cached
+  /// sequence to find the common prefix, trims diverged cache entries,
+  /// and only prefills new tokens.
   void generateBegin(
     MlxHandles handles,
     List<int> tokens,
     SamplingOptions options,
   );
 
-  /// Advance generation by one token. Returns the decoded text chunk,
-  /// an empty string for incomplete characters, or null when done.
-  String? generateNext(MlxHandles handles, {int bufferSize});
+  /// Advance generation by one token. Returns raw token bytes (not yet
+  /// decoded as UTF-8), an empty list for control tokens, or null when done.
+  /// The caller must feed these bytes through a chunked `Utf8Decoder`.
+  List<int>? generateNext(MlxHandles handles, {int bufferSize});
 
   void dispose(MlxHandles handles);
 }
@@ -212,7 +217,7 @@ final class MlxClient implements MlxClientApi {
   }
 
   @override
-  String? generateNext(MlxHandles handles, {int bufferSize = 256}) {
+  List<int>? generateNext(MlxHandles handles, {int bufferSize = 256}) {
     final b = handles.bindings;
     var buf = calloc<Uint8>(bufferSize);
     var n = b.generateNext(handles.contextHandle, buf.cast(), bufferSize);
@@ -231,13 +236,14 @@ final class MlxClient implements MlxClientApi {
       n = b.generateNext(handles.contextHandle, buf.cast(), needed);
     }
 
-    // 0 means incomplete character.
+    // 0 means control token (no bytes).
     if (n <= 0) {
       calloc.free(buf);
-      return n == 0 ? '' : null;
+      return n == 0 ? const <int>[] : null;
     }
 
-    final result = buf.cast<Utf8>().toDartString(length: n);
+    // Return raw bytes — caller handles UTF-8 reassembly.
+    final result = buf.asTypedList(n).toList(growable: false);
     calloc.free(buf);
     return result;
   }

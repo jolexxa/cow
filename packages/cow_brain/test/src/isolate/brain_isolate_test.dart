@@ -211,7 +211,7 @@ final class _FakeMlxClient implements MlxClientApi {
   ) {}
 
   @override
-  String? generateNext(MlxHandles handles, {int bufferSize = 256}) => null;
+  List<int>? generateNext(MlxHandles handles, {int bufferSize = 256}) => null;
 
   @override
   void dispose(MlxHandles handles) {}
