@@ -39,9 +39,10 @@ class ConfigResolver {
       }
     }
 
-    final primaryId = config.primaryModel ?? platform.defaultPrimaryModelId;
+    final primaryId =
+        config.primaryModel ?? platform.defaultPrimaryModelId.name;
     final lightId =
-        config.lightweightModel ?? platform.defaultLightweightModelId;
+        config.lightweightModel ?? platform.defaultLightweightModelId.name;
 
     final primary = resolved[primaryId];
     final lightweight = resolved[lightId];

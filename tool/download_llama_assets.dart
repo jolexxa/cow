@@ -16,8 +16,7 @@ Future<void> main(List<String> args) async {
     ..addOption(
       'tag',
       abbr: 't',
-      help:
-          'llama.cpp release tag (ex: b7818). If omitted, try to infer from '
+      help: 'llama.cpp release tag (ex: b7818). If omitted, try to infer from '
           'the git submodule.',
     );
 

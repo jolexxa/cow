@@ -77,8 +77,8 @@ final class FakeLlamaBindings implements LlamaBindings {
   newContextImpl;
 
   (llama_memory_t mem, int seqId, int p0, int p1)? lastMemoryRmArgs;
-  final List<(llama_memory_t mem, int seqId, int p0, int p1)>
-      memoryRmHistory = [];
+  final List<(llama_memory_t mem, int seqId, int p0, int p1)> memoryRmHistory =
+      [];
 
   Pointer<Char> chatTemplateResult = nullptr;
   int Function(

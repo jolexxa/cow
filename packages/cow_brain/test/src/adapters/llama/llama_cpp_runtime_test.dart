@@ -1090,8 +1090,7 @@ void main() {
       test(
         'front eviction partially trims cached tokens',
         () async {
-          final bindings = FakeLlamaBindings()
-            ..vocabIsEogImpl = (_, _) => true;
+          final bindings = FakeLlamaBindings()..vocabIsEogImpl = (_, _) => true;
           final client = FakeClient(bindings)
             ..tokenizeResult = [10, 20, 30, 40]
             ..sampleQueue.addAll([99, 99]);

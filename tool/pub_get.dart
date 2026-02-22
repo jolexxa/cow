@@ -11,10 +11,13 @@ Future<void> main(List<String> args) async {
 
   var ok = await runOnPackages(allDartPackages, target, (pkg) async {
     stdout.writeln('=== Getting packages for $pkg ===');
-    final code = await runCommand('dart', [
-      'pub',
-      'get',
-    ], workingDirectory: '${repoRoot().path}/$pkg');
+    final code = await runCommand(
+        'dart',
+        [
+          'pub',
+          'get',
+        ],
+        workingDirectory: '${repoRoot().path}/$pkg');
     stdout.writeln('');
     return code == 0;
   });
@@ -23,10 +26,13 @@ Future<void> main(List<String> args) async {
   // download_llama_assets.dart can import external packages.
   if (ok && target == null) {
     stdout.writeln('=== Getting packages for tool ===');
-    final toolCode = await runCommand('dart', [
-      'pub',
-      'get',
-    ], workingDirectory: '${repoRoot().path}/tool');
+    final toolCode = await runCommand(
+        'dart',
+        [
+          'pub',
+          'get',
+        ],
+        workingDirectory: '${repoRoot().path}/tool');
     stdout.writeln('');
     if (toolCode != 0) ok = false;
   }

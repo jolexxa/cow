@@ -69,10 +69,10 @@ sealed class OSPlatform {
   String _devAssetPath();
 
   /// Default primary model ID for this platform.
-  String get defaultPrimaryModelId;
+  AppModelId get defaultPrimaryModelId;
 
   /// Default lightweight (summary) model ID for this platform.
-  String get defaultLightweightModelId;
+  AppModelId get defaultLightweightModelId;
 
   static const int defaultContextSize = 10000;
   static const int batchSize = 512;
@@ -176,13 +176,13 @@ class MacOS extends OSPlatform {
 
   // Use MLX for the primary model on macOS whenever possible.
   @override
-  String get defaultPrimaryModelId =>
-      mlxLibraryPath != null ? AppModelId.qwen3Mlx.name : AppModelId.qwen3.name;
+  AppModelId get defaultPrimaryModelId =>
+      mlxLibraryPath != null ? AppModelId.qwen3Mlx : AppModelId.qwen3;
 
   // Use llama.cpp (CPU) for the lightweight model on macOS so that the big
   // model can use MLX (GPU) without hitching
   @override
-  String get defaultLightweightModelId => AppModelId.qwen25_3b.name;
+  AppModelId get defaultLightweightModelId => AppModelId.qwen25_3b;
 
   @override
   BackendRuntimeOptions buildRuntimeOptions({
@@ -293,10 +293,10 @@ class Linux extends OSPlatform {
   const Linux();
 
   @override
-  String get defaultPrimaryModelId => AppModelId.qwen3.name;
+  AppModelId get defaultPrimaryModelId => AppModelId.qwen3;
 
   @override
-  String get defaultLightweightModelId => AppModelId.qwen25_3b.name;
+  AppModelId get defaultLightweightModelId => AppModelId.qwen25_3b;
 
   @override
   BackendRuntimeOptions buildRuntimeOptions({

@@ -28,34 +28,43 @@ Future<void> main(List<String> args) async {
     }
 
     // Run tests with coverage.
-    var code = await runCommand('dart', [
-      'test',
-      '--coverage=coverage',
-    ], workingDirectory: pkgDir);
+    var code = await runCommand(
+        'dart',
+        [
+          'test',
+          '--coverage=coverage',
+        ],
+        workingDirectory: pkgDir);
     if (code != 0) return false;
 
     // Format coverage to lcov.
-    code = await runCommand('dart', [
-      'pub',
-      'global',
-      'run',
-      'coverage:format_coverage',
-      '--lcov',
-      '--in=coverage',
-      '--out=coverage/lcov.info',
-      '--report-on=lib',
-      '--check-ignore',
-      '--ignore-files=**/*.g.dart',
-    ], workingDirectory: pkgDir);
+    code = await runCommand(
+        'dart',
+        [
+          'pub',
+          'global',
+          'run',
+          'coverage:format_coverage',
+          '--lcov',
+          '--in=coverage',
+          '--out=coverage/lcov.info',
+          '--report-on=lib',
+          '--check-ignore',
+          '--ignore-files=**/*.g.dart',
+        ],
+        workingDirectory: pkgDir);
     if (code != 0) return false;
 
     // Print summary if lcov is available.
     final lcovResult = await Process.run('which', ['lcov']);
     if (lcovResult.exitCode == 0) {
-      await runCommand('lcov', [
-        '--summary',
-        'coverage/lcov.info',
-      ], workingDirectory: pkgDir);
+      await runCommand(
+          'lcov',
+          [
+            '--summary',
+            'coverage/lcov.info',
+          ],
+          workingDirectory: pkgDir);
     } else {
       stdout.writeln('(install lcov for coverage summary)');
     }

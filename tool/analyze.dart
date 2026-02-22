@@ -11,10 +11,13 @@ Future<void> main(List<String> args) async {
 
   final ok = await runOnPackages(allDartPackages, target, (pkg) async {
     stdout.writeln('=== Analyzing $pkg ===');
-    final code = await runCommand('dart', [
-      'analyze',
-      '--fatal-infos',
-    ], workingDirectory: '${repoRoot().path}/$pkg');
+    final code = await runCommand(
+        'dart',
+        [
+          'analyze',
+          '--fatal-infos',
+        ],
+        workingDirectory: '${repoRoot().path}/$pkg');
     stdout.writeln('');
     return code == 0;
   });
