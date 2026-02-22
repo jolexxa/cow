@@ -22,12 +22,15 @@ Future<void> main(List<String> args) async {
 
     if (buildRunnerPackages.contains(resolved)) {
       stdout.writeln('=== build_runner: $resolved ===');
-      final code = await runCommand('dart', [
-        'run',
-        'build_runner',
-        'build',
-        '--delete-conflicting-outputs',
-      ], workingDirectory: '$root/$resolved');
+      final code = await runCommand(
+          'dart',
+          [
+            'run',
+            'build_runner',
+            'build',
+            '--delete-conflicting-outputs',
+          ],
+          workingDirectory: '$root/$resolved');
       stdout.writeln('');
       if (code != 0) {
         exitCode = 1;
@@ -38,12 +41,15 @@ Future<void> main(List<String> args) async {
 
     if (ffigenPackages.contains(resolved)) {
       stdout.writeln('=== ffigen: $resolved ===');
-      final code = await runCommand('dart', [
-        'run',
-        'ffigen',
-        '--config',
-        'tool/ffigen.yaml',
-      ], workingDirectory: '$root/$resolved');
+      final code = await runCommand(
+          'dart',
+          [
+            'run',
+            'ffigen',
+            '--config',
+            'tool/ffigen.yaml',
+          ],
+          workingDirectory: '$root/$resolved');
       stdout.writeln('');
       if (code != 0) {
         exitCode = 1;
@@ -62,12 +68,15 @@ Future<void> main(List<String> args) async {
   // Run all.
   for (final pkg in buildRunnerPackages) {
     stdout.writeln('=== build_runner: $pkg ===');
-    final code = await runCommand('dart', [
-      'run',
-      'build_runner',
-      'build',
-      '--delete-conflicting-outputs',
-    ], workingDirectory: '$root/$pkg');
+    final code = await runCommand(
+        'dart',
+        [
+          'run',
+          'build_runner',
+          'build',
+          '--delete-conflicting-outputs',
+        ],
+        workingDirectory: '$root/$pkg');
     stdout.writeln('');
     if (code != 0) {
       exitCode = 1;
@@ -77,12 +86,15 @@ Future<void> main(List<String> args) async {
 
   for (final pkg in ffigenPackages) {
     stdout.writeln('=== ffigen: $pkg ===');
-    final code = await runCommand('dart', [
-      'run',
-      'ffigen',
-      '--config',
-      'tool/ffigen.yaml',
-    ], workingDirectory: '$root/$pkg');
+    final code = await runCommand(
+        'dart',
+        [
+          'run',
+          'ffigen',
+          '--config',
+          'tool/ffigen.yaml',
+        ],
+        workingDirectory: '$root/$pkg');
     stdout.writeln('');
     if (code != 0) {
       exitCode = 1;

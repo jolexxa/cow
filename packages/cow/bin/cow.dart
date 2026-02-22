@@ -2,7 +2,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:cow/src/app/app.dart';
-import 'package:cow/src/platforms/platform.dart';
+import 'package:cow/src/platforms/os_platform.dart';
 import 'package:ffi/ffi.dart';
 
 Future<void> main(List<String> args) async {

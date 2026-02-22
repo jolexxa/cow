@@ -77,6 +77,8 @@ final class FakeLlamaBindings implements LlamaBindings {
   newContextImpl;
 
   (llama_memory_t mem, int seqId, int p0, int p1)? lastMemoryRmArgs;
+  final List<(llama_memory_t mem, int seqId, int p0, int p1)> memoryRmHistory =
+      [];
 
   Pointer<Char> chatTemplateResult = nullptr;
   int Function(
@@ -322,6 +324,7 @@ final class FakeLlamaBindings implements LlamaBindings {
     int p1,
   ) {
     lastMemoryRmArgs = (mem, seqId, p0, p1);
+    memoryRmHistory.add((mem, seqId, p0, p1));
     return memorySeqRmImpl?.call(mem, seqId, p0, p1) ?? true;
   }
 

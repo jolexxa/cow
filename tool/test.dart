@@ -13,9 +13,12 @@ Future<void> main(List<String> args) async {
   // cow_mlx is a Swift package — delegate to test_mlx.dart.
   if (target == 'cow_mlx' || target == 'packages/cow_mlx') {
     stdout.writeln('=== Testing packages/cow_mlx (Swift) ===');
-    final code = await runCommand('dart', [
-      'tool/test_mlx.dart',
-    ], workingDirectory: repoRoot().path);
+    final code = await runCommand(
+        'dart',
+        [
+          'tool/test_mlx.dart',
+        ],
+        workingDirectory: repoRoot().path);
     stdout.writeln('');
     exitCode = code;
     return;
@@ -26,9 +29,12 @@ Future<void> main(List<String> args) async {
     if (!testDir.existsSync()) return true;
 
     stdout.writeln('=== Testing $pkg ===');
-    final code = await runCommand('dart', [
-      'test',
-    ], workingDirectory: '${repoRoot().path}/$pkg');
+    final code = await runCommand(
+        'dart',
+        [
+          'test',
+        ],
+        workingDirectory: '${repoRoot().path}/$pkg');
     stdout.writeln('');
     return code == 0;
   });

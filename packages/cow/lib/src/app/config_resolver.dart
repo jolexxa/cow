@@ -2,7 +2,7 @@ import 'package:cow/src/app/app_model_profile.dart';
 import 'package:cow/src/app/app_model_profiles.dart';
 import 'package:cow/src/app/cow_config.dart';
 import 'package:cow/src/app/model_runtime_config.dart';
-import 'package:cow/src/platforms/platform.dart';
+import 'package:cow/src/platforms/os_platform.dart';
 import 'package:cow_brain/cow_brain.dart';
 import 'package:cow_model_manager/cow_model_manager.dart';
 
@@ -39,9 +39,10 @@ class ConfigResolver {
       }
     }
 
-    final primaryId = config.primaryModel ?? platform.defaultPrimaryModelId;
+    final primaryId =
+        config.primaryModel ?? platform.defaultPrimaryModelId.name;
     final lightId =
-        config.lightweightModel ?? platform.defaultLightweightModelId;
+        config.lightweightModel ?? platform.defaultLightweightModelId.name;
 
     final primary = resolved[primaryId];
     final lightweight = resolved[lightId];

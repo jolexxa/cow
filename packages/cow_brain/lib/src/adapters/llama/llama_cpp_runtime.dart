@@ -4,6 +4,7 @@
 
 import 'dart:convert';
 import 'dart:ffi';
+import 'dart:math' show min;
 
 import 'package:cow_brain/src/adapters/inference_adapter.dart';
 import 'package:cow_brain/src/adapters/llama/llama_bindings.dart';
@@ -48,6 +49,7 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
 
   bool _disposed = false;
   bool _bosApplied = false;
+  List<int> _cachedTokens = [];
 
   /// Reads the chat template from the loaded model's GGUF metadata.
   ///
@@ -85,6 +87,7 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
     if (requiresReset) {
       _client.resetContext(_handles, _options.contextOptions);
       _bosApplied = false;
+      _cachedTokens = [];
     }
 
     final promptTokens = _client.tokenize(
@@ -96,9 +99,31 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
       _bosApplied = true;
     }
 
+    // Find common prefix between cached and new prompt tokens.
+    final commonPrefixLen = _commonPrefixLength(promptTokens);
+
+    // Trim diverged tokens from the KV cache.
+    if (commonPrefixLen < _cachedTokens.length) {
+      final b = _handles.bindings;
+      final mem = b.llama_get_memory(_handles.context);
+      final posMax = b.llama_memory_seq_pos_max(mem, 0);
+      if (posMax >= commonPrefixLen) {
+        b.llama_memory_seq_rm(mem, 0, commonPrefixLen, posMax + 1);
+      }
+      _cachedTokens = _cachedTokens.sublist(0, commonPrefixLen);
+    }
+
+    final newTokens = promptTokens.sublist(commonPrefixLen);
+
     final maxOutputTokens = _options.maxOutputTokensDefault;
-    _ensureRoomFor(promptTokens.length, maxOutputTokens);
-    _decodeTokens(promptTokens);
+    final dropped = _ensureRoomFor(newTokens.length, maxOutputTokens);
+    if (dropped > 0) {
+      _cachedTokens = dropped >= _cachedTokens.length
+          ? []
+          : _cachedTokens.sublist(dropped);
+    }
+    _decodeTokens(newTokens);
+    _cachedTokens = [..._cachedTokens, ...newTokens];
 
     final temperature = _options.samplingOptions.temperature ?? 0.7;
     final samplingOptions = SamplingOptions(
@@ -131,6 +156,7 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
         }
 
         _client.decode(_handles, _handles.context, <int>[token]);
+        _cachedTokens.add(token);
 
         if (b.llama_vocab_is_control(_handles.vocab, token)) {
           final chunk = assembler.addEmptyToken();
@@ -205,6 +231,7 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
     _ensureNotDisposed();
     _client.resetContext(_handles, _options.contextOptions);
     _bosApplied = false;
+    _cachedTokens = [];
   }
 
   void _ensureNotDisposed() {
@@ -213,7 +240,7 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
     }
   }
 
-  void _ensureRoomFor(int promptTokens, int maxOutputTokens) {
+  int _ensureRoomFor(int promptTokens, int maxOutputTokens) {
     final b = _handles.bindings;
     final mem = b.llama_get_memory(_handles.context);
 
@@ -233,16 +260,16 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
 
     final projectedTotal = currentTokens + requiredTokens;
     if (projectedTotal <= _options.contextOptions.contextSize) {
-      return;
+      return 0;
     }
     if (currentTokens == 0) {
-      return;
+      return 0;
     }
 
     final tokensToDrop = projectedTotal - _options.contextOptions.contextSize;
     if (tokensToDrop >= currentTokens) {
       b.llama_memory_seq_rm(mem, 0, posMin, posMax + 1);
-      return;
+      return currentTokens;
     }
 
     final dropStart = posMin;
@@ -251,6 +278,15 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
     if (!removed) {
       throw StateError('Failed to drop tokens from llama memory');
     }
+    return tokensToDrop;
+  }
+
+  int _commonPrefixLength(List<int> tokens) {
+    final limit = min(tokens.length, _cachedTokens.length);
+    for (var i = 0; i < limit; i++) {
+      if (tokens[i] != _cachedTokens[i]) return i;
+    }
+    return limit;
   }
 
   void _decodeTokens(List<int> tokens) {
