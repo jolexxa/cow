@@ -5,6 +5,8 @@
 import 'dart:convert';
 import 'dart:ffi';
 
+import 'package:meta/meta.dart';
+
 import 'package:cow_brain/src/adapters/inference_adapter.dart';
 import 'package:cow_brain/src/adapters/llama/llama_bindings.dart';
 import 'package:cow_brain/src/adapters/llama/llama_client.dart';
@@ -280,11 +282,12 @@ String _drainDecodedChunks(List<String> decodedChunks) {
   return piece;
 }
 
-// Test-only helpers to exercise chunk draining and sinks.
-String drainDecodedChunksForTesting(List<String> decodedChunks) =>
+@visibleForTesting
+String drainDecodedChunks(List<String> decodedChunks) =>
     _drainDecodedChunks(decodedChunks);
 
-StringSink chunkedStringSinkForTesting(List<String> chunks) =>
+@visibleForTesting
+StringSink llamaChunkedStringSink(List<String> chunks) =>
     _ChunkedStringSink(chunks);
 
 final class _ChunkedStringSink implements StringSink {

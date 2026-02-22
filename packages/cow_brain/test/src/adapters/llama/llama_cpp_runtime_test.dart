@@ -359,14 +359,14 @@ void main() {
 
     test('drains decoded chunks in helper', () {
       final chunks = <String>['a', 'b'];
-      final piece = drainDecodedChunksForTesting(chunks);
+      final piece = drainDecodedChunks(chunks);
       expect(piece, 'ab');
       expect(chunks, isEmpty);
     });
 
     test('chunked string sink writes all and writeln', () {
       final chunks = <String>[];
-      final sink = chunkedStringSinkForTesting(chunks);
+      final sink = llamaChunkedStringSink(chunks);
       sink.writeAll([1, null, 'b'], ',');
       sink.writeln('x');
       sink.writeln();

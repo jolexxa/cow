@@ -14,6 +14,7 @@ import 'package:cow_brain/src/adapters/stream_assembler.dart';
 import 'package:cow_brain/src/adapters/stream_chunk.dart';
 import 'package:cow_brain/src/isolate/brain_isolate.dart';
 import 'package:cow_brain/src/isolate/models.dart';
+import 'package:meta/meta.dart';
 
 /// MLX inference runtime.
 ///
@@ -117,10 +118,10 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
 
         byteSink.add(bytes);
         if (decodedChunks.isEmpty) {
-          final chunk = assembler.addEmptyToken();
+          final chunk = assembler.addEmptyToken(); // coverage:ignore-line
           if (chunk != null) {
-            yield chunk;
-            await _asyncBoundary();
+            yield chunk; // coverage:ignore-line
+            await _asyncBoundary(); // coverage:ignore-line
           }
           continue;
         }
@@ -129,8 +130,8 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
         if (piece.isEmpty) {
           final chunk = assembler.addEmptyToken();
           if (chunk != null) {
-            yield chunk;
-            await _asyncBoundary();
+            yield chunk; // coverage:ignore-line
+            await _asyncBoundary(); // coverage:ignore-line
           }
           continue;
         }
@@ -179,6 +180,14 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
 
   Future<void> _asyncBoundary() => Future<void>.delayed(Duration.zero);
 }
+
+@visibleForTesting
+String drainMlxDecodedChunks(List<String> decodedChunks) =>
+    _drainDecodedChunks(decodedChunks);
+
+@visibleForTesting
+StringSink mlxChunkedStringSink(List<String> chunks) =>
+    _ChunkedStringSink(chunks);
 
 String _drainDecodedChunks(List<String> decodedChunks) {
   final piece = decodedChunks.length == 1

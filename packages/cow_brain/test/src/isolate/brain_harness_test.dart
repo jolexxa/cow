@@ -51,6 +51,37 @@ void _fakeBrainIsolate(SendPort sendPort) {
   });
 }
 
+void _exitingBrainIsolate(SendPort sendPort) {
+  final receivePort = ReceivePort();
+  sendPort.send(receivePort.sendPort);
+
+  receivePort.listen((message) {
+    if (message is! Map) return;
+    final request = BrainRequest.fromJson(Map<String, Object?>.from(message));
+    if (request.type == BrainRequestType.init) {
+      sendPort.send(const AgentReady().toJson());
+      // Exit the isolate immediately after init.
+      receivePort.close();
+      Isolate.exit();
+    }
+  });
+}
+
+void _erroringBrainIsolate(SendPort sendPort) {
+  final receivePort = ReceivePort();
+  sendPort.send(receivePort.sendPort);
+
+  receivePort.listen((message) {
+    if (message is! Map) return;
+    final request = BrainRequest.fromJson(Map<String, Object?>.from(message));
+    if (request.type == BrainRequestType.init) {
+      sendPort.send(const AgentReady().toJson());
+      // Throw to trigger the error port.
+      throw StateError('isolate crash');
+    }
+  });
+}
+
 void _slowBrainIsolate(SendPort sendPort) {
   final receivePort = ReceivePort();
   sendPort.send(receivePort.sendPort);
@@ -236,6 +267,46 @@ void main() {
         ),
         throwsStateError,
       );
+    });
+
+    test('emits error when isolate exits unexpectedly', () async {
+      final harness = BrainHarness(entrypoint: _exitingBrainIsolate);
+      await harness.init(
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
+        tools: const <ToolDefinition>[],
+        settings: _settings(),
+        enableReasoning: true,
+      );
+
+      // The isolate exits immediately after init — should trigger the exit
+      // port listener and emit an error on the events stream.
+      await expectLater(
+        harness.events,
+        emitsError(isA<StateError>()),
+      );
+
+      await harness.dispose();
+    });
+
+    test('emits error when isolate throws', () async {
+      final harness = BrainHarness(entrypoint: _erroringBrainIsolate);
+      await harness.init(
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
+        tools: const <ToolDefinition>[],
+        settings: _settings(),
+        enableReasoning: true,
+      );
+
+      await expectLater(
+        harness.events,
+        emitsError(isA<StateError>()),
+      );
+
+      await harness.dispose();
     });
   });
 }
