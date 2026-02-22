@@ -5,8 +5,6 @@
 import 'dart:convert';
 import 'dart:ffi';
 
-import 'package:meta/meta.dart';
-
 import 'package:cow_brain/src/adapters/inference_adapter.dart';
 import 'package:cow_brain/src/adapters/llama/llama_bindings.dart';
 import 'package:cow_brain/src/adapters/llama/llama_client.dart';
@@ -16,6 +14,7 @@ import 'package:cow_brain/src/adapters/stream_assembler.dart';
 import 'package:cow_brain/src/adapters/stream_chunk.dart';
 import 'package:cow_brain/src/isolate/brain_isolate.dart';
 import 'package:cow_brain/src/isolate/models.dart';
+import 'package:meta/meta.dart';
 
 /// Native llama.cpp runtime that powers the [InferenceAdapter].
 ///

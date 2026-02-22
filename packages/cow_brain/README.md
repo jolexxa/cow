@@ -2,7 +2,7 @@
 
 [![style: very good analysis][very_good_analysis_badge]][very_good_analysis_link] [![Coverage][coverage_badge]][coverage_link]
 
-Cow Brain provides high-level agentic functionality for the Cow terminal AI application. It wraps around the [llama_cpp_dart](../llama_cpp_dart/README.md) package to facilitate interactions with local large language models.
+Cow Brain provides high-level agentic functionality for the Cow terminal AI application. It wraps two inference backends — [llama_cpp_dart](../llama_cpp_dart/README.md) and [MLX](../cow_mlx/README.md) (via [mlx_dart](../mlx_dart/README.md)) — behind a common `InferenceRuntime` interface to facilitate interactions with local large language models.
 
 ```txt
   ┌─────────────────────────────────────────────────────────────────┐
@@ -14,15 +14,15 @@ Cow Brain provides high-level agentic functionality for the Cow terminal AI appl
   │  │ dispose()                                                 │  │
   │  └──────────────────────────┬────────────────────────────────┘  │
   │                             │ (delegates everything)            │
-  │  BrainHarness               │         LlamaBackend              │
+  │  BrainHarness               │         ModelServer               │
   │  ┌──────────────────────────┴──────┐  ┌──────────────────────┐  │
-  │  │ • Spawns isolate                │  │ • Ref-counted native │  │
-  │  │ • Serializes BrainRequest →     │  │   backend init/free  │  │
-  │  │   JSON → SendPort               │  │ • Shared across all  │  │
-  │  │ • Deserializes JSON →           │  │   CowBrains instances│  │
-  │  │   AgentEvent stream             │  └──────────────────────┘  │
-  │  │ • Filters events by turnId      │                            │
-  │  └──────────────────────────┬──────┘                            │
+  │  │ • Spawns brain isolate          │  │ • Runs in its own    │  │
+  │  │ • Serializes BrainRequest →     │  │   isolate            │  │
+  │  │   JSON → SendPort               │  │ • Loads/unloads      │  │
+  │  │ • Deserializes JSON →           │  │   models (ref-count) │  │
+  │  │   AgentEvent stream             │  │ • Shared across all  │  │
+  │  │ • Filters events by turnId      │  │   CowBrains          │  │
+  │  └──────────────────────────┬──────┘  └──────────────────────┘  │
   └─────────────────────────────┼───────────────────────────────────┘
                                 │
               ══════════════════╪════════════════════════
@@ -32,7 +32,7 @@ Cow Brain provides high-level agentic functionality for the Cow terminal AI appl
   ┌─────────────────────────────┼───────────────────────────────────┐
   │                        WORKER ISOLATE                           │
   │                             │                                   │
-  │  _BrainSession (message router)                                 │
+  │  _BrainIsolate (message router)                                 │
   │  ┌──────────────────────────┴────────────────────────────────┐  │
   │  │ handleMessage() switches on BrainRequestType:             │  │
   │  │   init → build everything, send AgentReady                │  │
@@ -59,31 +59,35 @@ Cow Brain provides high-level agentic functionality for the Cow terminal AI appl
   │  ┌──────────────────────────────────────────────────────────┐   │
   │  │ LlmAdapter (interface)                                   │   │
   │  │                                                          │   │
-  │  │ InferenceAdapter (implementation)                            │   │
-  │  │ ┌─────────────────────────────────────────────────────┐  │   │
-  │  │ │ • Formats prompt via ModelProfile              │  │   │
-  │  │ │ • Feeds tokens to runtime                           │  │   │
-  │  │ │ • Parses streaming output via UniversalStreamParser │  │   │
-  │  │ │ • Yields ModelOutput events back to AgentLoop       │  │   │
-  │  │ └──────────────────────┬──────────────────────────────┘  │   │
+  │  │ InferenceAdapter (implementation)                        │   │
+  │  │ ┌────────────────────────────────────────────────────┐   │   │
+  │  │ │ • Formats prompt via ModelProfile                  │   │   │
+  │  │ │ • Feeds tokens to runtime                          │   │   │
+  │  │ │ • Parses streaming output via UniversalStreamParser│   │   │
+  │  │ │ • Yields ModelOutput events back to AgentLoop      │   │   │
+  │  │ └──────────────────────┬─────────────────────────────┘   │   │
   │  └────────────────────────┼─────────────────────────────────┘   │
   │                           │                                     │
   │       ┌───────────────────┼───────────────────┐                 │
   │       ▼                   ▼                   ▼                 │
-  │  ┌──────────┐  ┌────────────────┐  ┌────────────────────┐       │
-  │  │ Model    │  │ LlamaCppRuntime│  │ LlamaTokenCounter  │       │
-  │  │ Profile  │  │                │  │                    │       │
-  │  │          │  │ generate()     │  │ countPromptTokens()│       │
-  │  │ format + │  │ reset()        │  │ (used by Context   │       │
-  │  │ parse    │  │ dispose()      │  │  Manager)          │       │
-  │  └──────────┘  └───────┬────────┘  └────────────────────┘       │
-  │                        │                                        │
-  │                        ▼                                        │
-  │  ┌───────────────────────────────────────────────────────────┐  │
-  │  │ LlamaClient (FFI bridge) + LlamaSamplerChain              │  │
-  │  │                                                           │  │
-  │  │ dart:ffi → llama.cpp native library                       │  │
-  │  └───────────────────────────────────────────────────────────┘  │
+  │  ┌──────────┐  ┌─────────────────────┐  ┌──────────────────┐    │
+  │  │ Model    │  │ InferenceRuntime    │  │ TokenCounter     │    │
+  │  │ Profile  │  │ (interface)         │  │                  │    │
+  │  │          │  │                     │  │ countTokens()    │    │
+  │  │ format + │  │ ┌─────────────────┐ │  │ (used by Context │    │
+  │  │ parse    │  │ │ LlamaCppRuntime │ │  │  Manager)        │    │
+  │  │          │  │ │ (llama.cpp/FFI) │ │  └──────────────────┘    │
+  │  │          │  │ ├─────────────────┤ │                          │
+  │  │          │  │ │ MlxRuntime      │ │                          │
+  │  │          │  │ │ (MLX/FFI)       │ │                          │
+  │  │          │  │ └─────────────────┘ │                          │
+  │  └──────────┘  └─────────────────────┘                          │
+  │                                                                 │
+  │  Native FFI bridges:                                            │
+  │  ┌──────────────────────────────────────────────────────────┐   │
+  │  │ LlamaClient + LlamaSamplerChain  → llama.cpp (.so/.dylib)│   │
+  │  │ MlxClient + MlxBindings          → CowMLX   (.dylib)    │    │ 
+  │  └──────────────────────────────────────────────────────────┘   │
   └─────────────────────────────────────────────────────────────────┘
 
 
@@ -106,7 +110,7 @@ Cow Brain provides high-level agentic functionality for the Cow terminal AI appl
     │ qwen25 │ Qwen25PromptFormatter  │ UniversalStreamParser │
     └────────┴────────────────────────┴───────────────────────┘
 
-    Auto-detection: LlamaProfileDetector inspects the model's chat
+    Auto-detection: ProfileDetector inspects the model's chat
     template metadata to select the correct profile at init time.
 
 

@@ -1,8 +1,8 @@
 # CowMLX
 
-CowMLX is a Swift wrapper around Apple's local AI model inference engine, MLX. CowMLX exposes a C-compatible interface and compiles to a dynamic library (`libCowMLX.dylib`) that can be used from other languages.
+CowMLX is a Swift wrapper around Apple's local AI model inference engine, [MLX]. CowMLX exposes a C-compatible interface and compiles to a dynamic library (`libCowMLX.dylib`) that can be consumed by other languages via FFI (e.g., Dart via [mlx_dart](../mlx_dart/README.md)).
 
-CowMLX handles model loading, token generation, and GPU execution management.
+CowMLX handles model loading, tokenization, token generation with KV cache management, custom sampling, and byte-level detokenization.
 
 ## Why CowMLX exists
 
@@ -30,14 +30,9 @@ MLX has a C API (`Cmlx`), but it only covers the compute engine — array ops, s
   └─────────────────────────────────────────────────────┘
 ```
 
-CowMLX bridges the Swift-only layers down to a flat C interface (`cow_mlx.h`) so other toolchains can call into it. CowMLX also handles the async-to-sync bridging (Swift concurrency → blocking C calls), thread safety, and per-context GPU stream management that the upstream packages don't provide.
+CowMLX bridges the Swift-only layers down to a flat C interface (`cow_mlx.h`) so other toolchains can call into it. CowMLX also handles the async-to-sync bridging (Swift concurrency → blocking C calls via `runBlocking` + `DispatchSemaphore`) and thread safety that the upstream packages don't provide.
 
 ## Architecture
-
-Client apps run inference on multiple AI models at once (one per thread) without blocking the UI. MLX itself doesn't support true multi-threading yet ([confirmed](https://github.com/ml-explore/mlx/issues/3078#issuecomment-3818105000) by [Awni](https://github.com/awni), AI @ Apple). CowMLX works around this by serializing all MLX access through a single dispatch queue while using per-context GPU streams for hardware-level parallelism.
-
-> [!NOTE]
-> We could use multiple processes, but our approach has been opting for a single-process architecture and planning forward. All local model inference engines seem to be moving towards multi-threading support, so we don't want to waste time building out process serialization and inter-process communication when the world's about to get a whole lot better. The GPU can only handle so much concurrent work anyway, so performance characteristics would be roughly the same regardless.
 
 ```txt
     Thread A                    Thread B
@@ -47,28 +42,27 @@ Client apps run inference on multiple AI models at once (one per thread) without
        │                           │
   ═════╪═══════════════════════════╪══════════════════════
        │    C API (cow_mlx.h)      │
-       │    all calls serialize    │
-       │    through mlxQueue       │
+       │    @_cdecl exports        │
   ═════╪═══════════════════════════╪══════════════════════
        │                           │
        ▼                           ▼
   ┌─────────────────────────────────────────────────────┐
-  │                   mlxQueue                          │
-  │            (serial DispatchQueue)                   │
+  │                   runBlocking()                      │
+  │             (Task + DispatchSemaphore)               │
   │                                                     │
-  │  All MLX operations run here — one at a time on     │
-  │  the CPU. Before each operation, the context's GPU  │
-  │  stream is set as the global default via             │
-  │  mlx_set_default_stream().                          │
+  │  Bridges sync FFI calls into Swift async context.   │
+  │  Model loading serialized via modelLoadLock (NSLock)│
+  │  because LLMModelFactory is not thread-safe.        │
+  │  GPU eval serialized by MLX's internal evalLock.    │
   └──────────────┬──────────────────┬───────────────────┘
                  │                  │
                  ▼                  ▼
   ┌──────────────────┐  ┌──────────────────┐
   │ CowMLXContext 0  │  │ CowMLXContext 1  │
   │                  │  │                  │
-  │ stream: GPU:1    │  │ stream: GPU:2    │
   │ iterator (KV $)  │  │ iterator (KV $)  │
-  │ detokenizer      │  │ detokenizer      │
+  │ cache [KVCache]  │  │ cache [KVCache]  │
+  │ cachedTokens     │  │ cachedTokens     │
   │ stop tokens      │  │ stop tokens      │
   └────────┬─────────┘  └────────┬─────────┘
            │    OWNED per ctx    │
@@ -79,20 +73,49 @@ Client apps run inference on multiple AI models at once (one per thread) without
   │  CowMLXModel 0   │◄──────────┘
   │  (SHARED)        │
   │                  │
-  │  weights (r/o)   │
-  │  tokenizer       │
-  │  config          │
+  │  container       │  weights (read-only)
+  │  tokenizer       │  cached for sync access
+  │  config          │  model configuration
+  │  decoderType     │  byteLevel or byteFallback
   └──────────────────┘
-
-  GPU
-  ═══════════════════════════════════════════
-  Stream GPU:1 ──▶ [ctx 0 ops]──▶ ┐
-                                   ├─ parallel
-  Stream GPU:2 ──▶ [ctx 1 ops]──▶ ┘
-  ═══════════════════════════════════════════
 ```
 
-- **Thread safety**: Every C API entry point funnels through `mlxQueue`. No two MLX operations ever execute concurrently on the CPU.
-- **GPU parallelism**: Each context owns an `mlx_stream` (GPU command queue). Operations are tagged with that stream when created. The GPU can overlap work from different streams between dispatches.
-- **Shared model**: Model weights are read-only after loading. Multiple contexts share one `CowMLXModel` via integer handle IDs that are safe to pass across thread boundaries.
-- **Owned state**: KV cache, iterator, detokenizer, stop tokens, and GPU stream are exclusively owned by each context.
+All contexts share the default GPU stream. MLX's internal `evalLock` serializes eval calls, so separate per-context GPU streams don't provide additional parallelism.
+
+### Key design points
+
+- **Thread safety**: Sync-to-async bridging via `runBlocking()` (Swift `Task` + `DispatchSemaphore`). Model loading serialized with `modelLoadLock` (`NSLock`) because `LLMModelFactory` is not thread-safe. GPU eval serialized by MLX's own `evalLock`.
+- **Handle registry**: Models and contexts are stored in a thread-safe `HandleRegistry<T>` that maps `Int32` handles to Swift objects. Handles are safe to pass across thread boundaries.
+- **Shared model**: Model weights are read-only after loading. Multiple contexts share one `CowMLXModel` via integer handle IDs. Cross-thread sharing uses `cow_mlx_model_get_id` / `cow_mlx_model_from_id`.
+- **Owned state**: KV cache, iterator, cached token sequence, and stop tokens are exclusively owned by each context.
+
+### Incremental generation (prefix caching)
+
+Each context tracks `cachedTokens` — the token IDs that produced the current KV cache state. On `generate_begin`, the native side compares incoming tokens against `cachedTokens` to find the common prefix, trims any diverged cache entries, and only prefills new tokens. This avoids re-processing the entire prompt on each turn.
+
+### KV cache management
+
+The C API exposes three cache operations:
+
+- `cow_mlx_cache_token_count` — query current cache size
+- `cow_mlx_cache_trim_end` — undo tokens from the end (via `KVCache.trim()`)
+- `cow_mlx_cache_trim_front` — sliding window eviction from the front (slices axis 2 of the `state` arrays via getter/setter)
+
+### Byte decoding
+
+Token strings from the vocabulary are converted to raw `[UInt8]` bytes by `ByteDecoder.swift`, dispatched based on the tokenizer's encoding scheme:
+
+- **ByteLevel (GPT-2)** — each byte maps to a unique Unicode character. Used by Qwen, Llama 3+, DeepSeek, StableLM.
+- **ByteFallback (SentencePiece)** — raw bytes as `<0xHH>` tokens, metaspace `▁` for leading spaces. Used by Llama 2, Mistral, Mixtral, Phi-3.
+
+The scheme is auto-detected from `tokenizer.json` at model load time (`TokenizerDetector.swift`). Raw bytes are returned to caller, which must handle UTF-8 reassembly.
+
+### Custom sampler
+
+`CustomSampler` implements `MLXLMCommon.LogitSampler` with topK and minP filtering (not provided by Apple's built-in samplers). Full sampling parameter set: `temperature`, `topP`, `topK`, `minP`, `repeatPenalty`, `repeatWindow`, `seed`.
+
+## C API
+
+The full API is defined in [`Sources/CowMLX/include/cow_mlx.h`](Sources/CowMLX/include/cow_mlx.h). All functions are synchronous and blocking. Handles are `Int32` indices (not raw pointers).
+
+[MLX]: https://github.com/ml-explore/mlx

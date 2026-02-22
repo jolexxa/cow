@@ -40,13 +40,17 @@ To build from source, you will need to have [Dart SDK] installed.
 # included with Cow.
 git clone --recursive https://github.com/jolexxa/cow.git
 
-# Download the required native libraries for llama_cpp based on the
-# host operating system (macOS ARM64 or Linux x64):
-dart ./tool/download_llama_assets.dart
 
 # Get packages recursively for all sub-projects:
 dart pub global activate very_good_cli
 very_good packages get -r
+
+# Download the required native libraries for llama_cpp based on the
+# host operating system (macOS ARM64 or Linux x64):
+dart ./tool/download_llama_assets.dart
+
+# On macOS, build the MLX native library:
+tool/build_mlx.sh
 
 # To build only:
 # dart build cli
@@ -61,18 +65,21 @@ The first time you run Cow, it will download the required model files automatica
 
 ## 🧠 Cow Intelligence
 
-Cow introduces a package which uses FFI bindings for [llama_cpp] called [llama_cpp_dart](./packages/llama_cpp_dart/README.md), enabling Cow to run local large language models.
+Cow supports two inference backends:
 
-A higher-level packaged called [cow_brain](./packages/cow_brain/README.md) wraps `llama_cpp` and enables high-level agentic functionality.
+- **[llama.cpp]** via [llama_cpp_dart](./packages/llama_cpp_dart/README.md) — runs quantized GGUF models on CPU/GPU (Apple Silicon and Linux x64)
+- **[MLX]** via [cow_mlx](./packages/cow_mlx/README.md) + [mlx_dart](./packages/mlx_dart/README.md) — runs MLX-format models natively on Apple Silicon
 
-Cow currently supports models in the `.gguf` format and uses `Qwen 2.5-7B Instruct` for lightweight summarization tasks and `Qwen 3-8B` for primary interactions, including reasoning and tool execution.
+A higher-level package called [cow_brain](./packages/cow_brain/README.md) wraps both backends behind a common `InferenceRuntime` interface and enables high-level agentic functionality (reasoning, tool use, context management).
+
+On Apple Silicon, Cow uses MLX with `Qwen 3-8B 4-bit` for primary interactions and `Qwen 2.5-3B Instruct 4-bit` for lightweight summarization. On Linux, Cow uses llama.cpp with the equivalent GGUF models.
 
 Cow cannot support arbitrary models. Most models require prompts to follow a specific template, usually provided as [jinja] code.
 
 > [!TIP]
-> Since Cow tries to avoid re-tokenizing the message history on each interaction, one would need to implement the template for any new models in native Dart code. This may involve writing a [prompt formatter](packages/cow_brain/lib/src/adapters/llama/qwen3_prompt_formatter.dart), [stream parser](packages/cow_brain/lib/src/adapters/llama/qwen_stream_parser.dart), and/or [tool parser](packages/cow_brain/lib/src/adapters/llama/qwen3_tool_call_parser.dart) before hooking it up in the [llama profiles](packages/cow_brain/lib/src/adapters/llama/llama_profiles.dart), [app model profiles](lib/src/app/app_model_profiles.dart), and [main app](lib/src/app/app.dart).
+> Since Cow tries to avoid re-tokenizing the message history on each interaction, one would need to implement the template for any new models in native Dart code. This may involve writing a [prompt formatter](packages/cow_brain/lib/src/adapters/qwen3_prompt_formatter.dart), [stream parser](packages/cow_brain/lib/src/adapters/universal_stream_parser.dart), and/or [tool call extractor](packages/cow_brain/lib/src/adapters/extractors/json_tool_call_extractor.dart) before hooking it up in the [model profiles](packages/cow_brain/lib/src/adapters/model_profiles.dart), [app model profiles](packages/cow/lib/src/app/app_model_profiles.dart), and [main app](packages/cow/lib/src/app/app.dart).
 
-One could change the context size in [AppInfo](./lib/src/app/app_info.dart). One should be sure they have enough memory to support the context size they choose or they might just put their computer out to pasture.
+One could change the context size in [AppInfo](./packages/cow/lib/src/app/app_info.dart). One should be sure they have enough memory to support the context size they choose or they might just put their computer out to pasture.
 
 ## 💻 Terminal
 
@@ -104,7 +111,7 @@ Cow itself is licensed under the permissive MIT license. Yee-haw!
 [very_good_analysis_badge]: https://img.shields.io/badge/style-very_good_analysis-B22C89.svg
 [very_good_analysis_link]: https://pub.dev/packages/very_good_analysis
 [nocterm]: https://pub.dev/packages/nocterm
-[llama_cpp]: https://github.com/ggml-org/llama.cpp
+[MLX]: https://github.com/ml-explore/mlx
 [cowsay]: https://en.wikipedia.org/wiki/Cowsay
 [bloc]: https://pub.dev/packages/bloc
 [Hugging Face]: https://huggingface.co/
@@ -113,3 +120,4 @@ Cow itself is licensed under the permissive MIT license. Yee-haw!
 [Apple]: https://farmhouseguide.com/what-fruits-can-cows-eat/#Apples
 [Alibaba Cloud]: https://www.alibabacloud.com/
 [jinja]: https://jinja.palletsprojects.com/
+[llama.cpp]: https://github.com/ggml-org/llama.cpp
