@@ -7,7 +7,7 @@ import 'package:cow/src/app/app_theme.dart';
 import 'package:cow/src/app/session_log.dart';
 import 'package:cow/src/features/chat/chat.dart';
 import 'package:cow/src/features/startup/startup.dart';
-import 'package:cow/src/platforms/platform.dart';
+import 'package:cow/src/platforms/os_platform.dart';
 import 'package:io/io.dart';
 import 'package:nocterm/nocterm.dart';
 
