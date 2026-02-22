@@ -794,6 +794,58 @@ void main() {
       },
     );
 
+    test(
+      'per-sequence KV budget uses contextSize / maxSequences',
+      () async {
+        // With maxSequences=2, each sequence gets contextSize/2 = 6 tokens.
+        // 4 existing + 2 prompt + 4 output = 10 > 6, should drop 4.
+        final bindings = FakeLlamaBindings()
+          ..posMin = 0
+          ..posMax =
+              3 // 4 tokens already in cache
+          ..vocabIsEogImpl = (_, _) => true;
+        final client = FakeClient(bindings)
+          ..tokenizeResult = List<int>.filled(2, 1)
+          ..sampleQueue.addAll([2, 2]);
+
+        final runtime = LlamaCppRuntime(
+          modelPointer: 1,
+          options: const LlamaCppRuntimeOptions(
+            modelPath: 'model',
+            libraryPath: '/tmp/libllama.so',
+            contextOptions: LlamaContextOptions(
+              contextSize: 12,
+              nBatch: 4,
+              nThreads: 1,
+              nThreadsBatch: 1,
+            ),
+            maxOutputTokensDefault: 4,
+            maxSequences: 2,
+          ),
+          client: client,
+          bindings: bindings,
+        );
+
+        await runtime
+            .generate(
+              prompt: 'hi',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        expect(bindings.lastMemoryRmArgs, isNotNull);
+        final (_, seqId, p0, p1) = bindings.lastMemoryRmArgs!;
+        expect(seqId, 0);
+        // Per-seq budget = 12 ~/ 2 = 6. Projected = 4 + 2 + 4 = 10.
+        // Drop 10 - 6 = 4 tokens from front.
+        expect(p0, 0);
+        expect(p1, 4);
+      },
+    );
+
     group('prefix caching', () {
       test('reuses common prefix and only decodes new tokens', () async {
         final bindings = FakeLlamaBindings()..vocabIsEogImpl = (_, _) => true;

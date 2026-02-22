@@ -74,12 +74,15 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
     _ensureNotDisposed();
     _ensureSequenceExists(sequenceId);
 
-    // Temporarily point _handles at this sequence's context.
-    _handles.contextHandle = _contextHandles[sequenceId]!;
+    // Capture the context handle locally so concurrent sequences
+    // cannot corrupt each other via the shared _handles object.
+    var ctxHandle = _contextHandles[sequenceId]!;
 
     if (requiresReset) {
-      _client.resetContext(_handles, _options.contextSize);
-      _contextHandles[sequenceId] = _handles.contextHandle;
+      // Free old context, create fresh one, update map.
+      _bindings.freeContext(ctxHandle);
+      ctxHandle = _client.createContext(_handles, _options.contextSize);
+      _contextHandles[sequenceId] = ctxHandle;
     }
 
     // Tokenize the full prompt every time. The native side compares
@@ -96,6 +99,7 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
       _handles,
       promptTokens,
       _options.samplingOptions,
+      contextHandle: ctxHandle,
     );
 
     final maxOutputTokens = _options.maxOutputTokensDefault;
@@ -114,7 +118,10 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
 
     try {
       for (var i = 0; i < maxOutputTokens; i += 1) {
-        final bytes = _client.generateNext(_handles);
+        final bytes = _client.generateNext(
+          _handles,
+          contextHandle: ctxHandle,
+        );
 
         // null means generation is done (EOG or max tokens).
         if (bytes == null) break;

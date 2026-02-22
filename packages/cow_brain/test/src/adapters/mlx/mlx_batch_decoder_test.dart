@@ -246,10 +246,15 @@ final class _FakeBatchMlxClient implements MlxClientApi {
   void generateBegin(
     MlxHandles handles,
     List<int> tokens,
-    SamplingOptions options,
-  ) {}
+    SamplingOptions options, {
+    required int contextHandle,
+  }) {}
   @override
-  List<int>? generateNext(MlxHandles handles, {int bufferSize = 256}) => null;
+  List<int>? generateNext(
+    MlxHandles handles, {
+    required int contextHandle,
+    int bufferSize = 256,
+  }) => null;
   @override
   void dispose(MlxHandles handles) {}
 }

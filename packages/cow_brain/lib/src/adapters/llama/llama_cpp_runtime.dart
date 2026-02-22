@@ -354,23 +354,28 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
         ? (posMax - posMin + 1)
         : 0;
 
+    // With multiple sequences, the KV cache is shared — each sequence
+    // gets contextSize ~/ maxSequences worth of budget.
+    final perSeqBudget =
+        _options.contextOptions.contextSize ~/ _options.maxSequences;
+
     final requiredTokens = promptTokens + maxOutputTokens;
-    if (requiredTokens > _options.contextOptions.contextSize) {
+    if (requiredTokens > perSeqBudget) {
       throw StateError(
-        'Prompt too long for context ($promptTokens + $maxOutputTokens > '
-        '${_options.contextOptions.contextSize})',
+        'Prompt too long for per-sequence budget '
+        '($promptTokens + $maxOutputTokens > $perSeqBudget)',
       );
     }
 
     final projectedTotal = currentTokens + requiredTokens;
-    if (projectedTotal <= _options.contextOptions.contextSize) {
+    if (projectedTotal <= perSeqBudget) {
       return 0;
     }
     if (currentTokens == 0) {
       return 0;
     }
 
-    final tokensToDrop = projectedTotal - _options.contextOptions.contextSize;
+    final tokensToDrop = projectedTotal - perSeqBudget;
     if (tokensToDrop >= currentTokens) {
       b.llama_memory_seq_rm(mem, sequenceId, posMin, posMax + 1);
       return currentTokens;

@@ -40,13 +40,18 @@ abstract class MlxClientApi {
   void generateBegin(
     MlxHandles handles,
     List<int> tokens,
-    SamplingOptions options,
-  );
+    SamplingOptions options, {
+    required int contextHandle,
+  });
 
   /// Advance generation by one token. Returns raw token bytes (not yet
   /// decoded as UTF-8), an empty list for control tokens, or null when done.
   /// The caller must feed these bytes through a chunked `Utf8Decoder`.
-  List<int>? generateNext(MlxHandles handles, {int bufferSize});
+  List<int>? generateNext(
+    MlxHandles handles, {
+    required int contextHandle,
+    int bufferSize,
+  });
 
   void dispose(MlxHandles handles);
 
@@ -214,9 +219,11 @@ final class MlxClient implements MlxClientApi {
   void generateBegin(
     MlxHandles handles,
     List<int> tokens,
-    SamplingOptions options,
-  ) {
+    SamplingOptions options, {
+    required int contextHandle,
+  }) {
     if (tokens.isEmpty) return;
+    final ctx = contextHandle;
     final b = handles.bindings;
     final tokensPtr = calloc<Int32>(tokens.length);
     for (var i = 0; i < tokens.length; i++) {
@@ -224,7 +231,7 @@ final class MlxClient implements MlxClientApi {
     }
 
     final ok = b.generateBegin(
-      handles.contextHandle,
+      ctx,
       tokensPtr,
       tokens.length,
       options.temperature ?? 0.7,
@@ -244,10 +251,15 @@ final class MlxClient implements MlxClientApi {
   }
 
   @override
-  List<int>? generateNext(MlxHandles handles, {int bufferSize = 256}) {
+  List<int>? generateNext(
+    MlxHandles handles, {
+    required int contextHandle,
+    int bufferSize = 256,
+  }) {
+    final ctx = contextHandle;
     final b = handles.bindings;
     var buf = calloc<Uint8>(bufferSize);
-    var n = b.generateNext(handles.contextHandle, buf.cast(), bufferSize);
+    var n = b.generateNext(ctx, buf.cast(), bufferSize);
 
     // -1 means done (EOG or max tokens).
     if (n == -1) {
@@ -260,7 +272,7 @@ final class MlxClient implements MlxClientApi {
       calloc.free(buf);
       final needed = -n;
       buf = calloc<Uint8>(needed);
-      n = b.generateNext(handles.contextHandle, buf.cast(), needed);
+      n = b.generateNext(ctx, buf.cast(), needed);
     }
 
     // 0 means control token (no bytes).

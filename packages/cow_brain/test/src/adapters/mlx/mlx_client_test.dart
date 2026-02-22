@@ -321,7 +321,12 @@ void main() {
       final client = _client();
       final handles = _handles(bindings, contextHandle: 3);
 
-      client.generateBegin(handles, [10, 20, 30], options);
+      client.generateBegin(
+        handles,
+        [10, 20, 30],
+        options,
+        contextHandle: handles.contextHandle,
+      );
 
       expect(bindings.generateBeginCalls, 1);
       expect(bindings.lastGenerateBeginTokens, [10, 20, 30]);
@@ -340,7 +345,12 @@ void main() {
       final client = _client();
       final handles = _handles(bindings, contextHandle: 3);
 
-      client.generateBegin(handles, [1], options);
+      client.generateBegin(
+        handles,
+        [1],
+        options,
+        contextHandle: handles.contextHandle,
+      );
 
       // Defaults from MlxClient source: temp=0.7, topP=0.95, topK=40,
       // minP=0.05, repeatPenalty=1.1, repeatWindow=64, seed=0.
@@ -357,7 +367,12 @@ void main() {
       final client = _client();
       final handles = _handles(bindings, contextHandle: 3);
 
-      client.generateBegin(handles, [], const SamplingOptions());
+      client.generateBegin(
+        handles,
+        [],
+        const SamplingOptions(),
+        contextHandle: handles.contextHandle,
+      );
 
       expect(bindings.generateBeginCalls, 0);
     });
@@ -371,7 +386,12 @@ void main() {
       final handles = _handles(bindings, contextHandle: 3);
 
       expect(
-        () => client.generateBegin(handles, [1, 2], const SamplingOptions()),
+        () => client.generateBegin(
+          handles,
+          [1, 2],
+          const SamplingOptions(),
+          contextHandle: handles.contextHandle,
+        ),
         throwsA(
           isA<StateError>().having(
             (e) => e.message,
@@ -393,7 +413,10 @@ void main() {
       final client = _client();
       final handles = _handles(bindings, contextHandle: 3);
 
-      expect(client.generateNext(handles), isNull);
+      expect(
+        client.generateNext(handles, contextHandle: handles.contextHandle),
+        isNull,
+      );
       expect(bindings.generateNextCalls, 1);
     });
 
@@ -403,7 +426,10 @@ void main() {
       final client = _client();
       final handles = _handles(bindings, contextHandle: 3);
 
-      expect(client.generateNext(handles), const <int>[]);
+      expect(
+        client.generateNext(handles, contextHandle: handles.contextHandle),
+        const <int>[],
+      );
     });
 
     test('returns raw bytes when bindings write bytes to buffer', () {
@@ -419,7 +445,10 @@ void main() {
       final client = _client();
       final handles = _handles(bindings, contextHandle: 3);
 
-      expect(client.generateNext(handles), utf8.encode('Hi'));
+      expect(
+        client.generateNext(handles, contextHandle: handles.contextHandle),
+        utf8.encode('Hi'),
+      );
     });
 
     test('retries with larger buffer when bindings return < -1', () {
@@ -442,7 +471,10 @@ void main() {
       final client = _client();
       final handles = _handles(bindings, contextHandle: 3);
 
-      final result = client.generateNext(handles);
+      final result = client.generateNext(
+        handles,
+        contextHandle: handles.contextHandle,
+      );
 
       expect(result, utf8.encode('Hello!'));
       expect(bindings.generateNextCalls, 2);
@@ -462,7 +494,10 @@ void main() {
       final handles = _handles(bindings, contextHandle: 3);
 
       // After retry n == -1, which falls into n <= 0 branch and n != 0 => null.
-      expect(client.generateNext(handles), isNull);
+      expect(
+        client.generateNext(handles, contextHandle: handles.contextHandle),
+        isNull,
+      );
     });
   });
 

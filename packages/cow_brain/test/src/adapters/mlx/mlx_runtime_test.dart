@@ -157,7 +157,7 @@ void main() {
     });
 
     test(
-      'generate with requiresReset calls resetContext and resets BOS',
+      'generate with requiresReset recreates context and resets BOS',
       () async {
         final bindings = FakeMlxBindings();
         final client = _FakeMlxClient()..generateNextQueue.add(null);
@@ -190,7 +190,10 @@ void main() {
             )
             .toList();
 
-        expect(client.resetContextCalls, 1);
+        // Reset now frees the old context and creates a new one.
+        expect(bindings.freeContextCalls, 1);
+        // Constructor created one context, reset created another.
+        expect(client.createContextCalls, 2);
         // After reset, BOS should be false again so next tokenize gets
         // addSpecial=true.
         expect(client.addSpecialCalls.last, isTrue);
@@ -595,7 +598,7 @@ void main() {
     );
 
     test(
-      'reset between generations calls resetContext and re-sends BOS',
+      'reset between generations recreates context and re-sends BOS',
       () async {
         final bindings = FakeMlxBindings();
         final client = _FakeMlxClient()..generateNextQueue.addAll([null, null]);
@@ -624,7 +627,9 @@ void main() {
             )
             .toList();
 
-        expect(client.resetContextCalls, 1);
+        // Reset frees old context + creates new one.
+        expect(bindings.freeContextCalls, 1);
+        expect(client.createContextCalls, 2);
         // BOS re-sent after reset.
         expect(client.addSpecialCalls, [true, true]);
       },
@@ -672,7 +677,9 @@ void main() {
 
       // All three always get addSpecial=true for KV cache alignment.
       expect(client.addSpecialCalls, [true, true, true]);
-      expect(client.resetContextCalls, 1);
+      // Third generate had requiresReset — frees old context + creates new.
+      expect(bindings.freeContextCalls, 1);
+      expect(client.createContextCalls, 2);
     });
   });
 
@@ -928,16 +935,21 @@ final class _FakeMlxClient implements MlxClientApi {
   void generateBegin(
     MlxHandles handles,
     List<int> tokens,
-    SamplingOptions options,
-  ) {
+    SamplingOptions options, {
+    required int contextHandle,
+  }) {
     generateBeginCalls++;
-    lastGenerateBeginContextHandle = handles.contextHandle;
+    lastGenerateBeginContextHandle = contextHandle;
   }
 
   int? lastGenerateBeginContextHandle;
 
   @override
-  List<int>? generateNext(MlxHandles handles, {int bufferSize = 256}) {
+  List<int>? generateNext(
+    MlxHandles handles, {
+    required int contextHandle,
+    int bufferSize = 256,
+  }) {
     generateNextCalls++;
     if (generateNextQueue.isEmpty) return null;
     return generateNextQueue.removeAt(0);

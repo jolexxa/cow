@@ -65,8 +65,14 @@ final class CowMLXBatchContext: @unchecked Sendable {
     ) {
         guard !pendingSequences.isEmpty else { return }
 
-        self.sampler = sampler
-        self.stopTokenIds = stopTokenIds
+        // Only set sampler/stop tokens on first prefill — the batch samples
+        // all sequences at once so per-sequence params aren't possible.
+        if self.sampler == nil {
+            self.sampler = sampler
+        }
+        if self.stopTokenIds.isEmpty {
+            self.stopTokenIds = stopTokenIds
+        }
 
         let prompts = pendingSequences.map(\.tokens)
         let ids = pendingSequences.map(\.id)
