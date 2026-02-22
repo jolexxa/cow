@@ -11,28 +11,32 @@ import 'package:cow_brain/src/isolate/models.dart';
 final class BrainIsolateConfig {
   BrainIsolateConfig({
     required this.runtime,
-    required this.agent,
-    required this.conversation,
     required this.defaultSettings,
     required this.options,
     required this.enableReasoningDefault,
-  });
+    required AgentRunner agent,
+    required Conversation conversation,
+  }) {
+    agents[0] = agent;
+    conversations[0] = conversation;
+  }
 
   final BrainRuntime runtime;
   final AgentSettings defaultSettings;
   final BackendRuntimeOptions options;
   final bool enableReasoningDefault;
 
-  // Mutable — agent settings change per-turn, conversation resets
-  AgentRunner agent;
-  Conversation conversation;
+  // Per-sequence state.
+  final Map<int, AgentRunner> agents = {};
+  final Map<int, Conversation> conversations = {};
 }
 
 /// Turn-level coordination. Always exists on blackboard.
 final class BrainIsolateData {
-  bool cancelRequested = false;
+  final Set<int> activeSequences = {};
 
-  // Turn settings (set when turn starts, used by _streamTurn)
-  int maxSteps = 8;
-  bool enableReasoning = true;
+  // Per-sequence turn settings (set when turn starts, used by _streamTurn).
+  final Map<int, bool> cancelRequested = {0: false};
+  final Map<int, int> maxSteps = {0: 8};
+  final Map<int, bool> enableReasoning = {0: true};
 }

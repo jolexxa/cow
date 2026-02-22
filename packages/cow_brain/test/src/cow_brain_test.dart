@@ -34,6 +34,8 @@ void _fakeBrainIsolate(SendPort sendPort) {
       case BrainRequestType.cancel:
       case BrainRequestType.reset:
       case BrainRequestType.dispose:
+      case BrainRequestType.createSequence:
+      case BrainRequestType.destroySequence:
         return;
     }
   });
@@ -115,7 +117,7 @@ void main() {
             content: 'ok',
           ),
         )
-        ..cancel('turn-1')
+        ..cancel(turnId: 'turn-1')
         ..reset();
 
       await brain.dispose();

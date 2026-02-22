@@ -107,6 +107,14 @@ abstract class LlamaBindings {
     int p1,
   );
 
+  void llama_memory_seq_cp(
+    llama_memory_t mem,
+    int seqIdSrc,
+    int seqIdDst,
+    int p0,
+    int p1,
+  );
+
   Pointer<Char> llama_model_chat_template(
     Pointer<llama_model> model,
     Pointer<Char> name,
@@ -320,6 +328,15 @@ final class LlamaBindingsAdapter implements LlamaBindings {
     int p0,
     int p1,
   ) => _bindings.llama_memory_seq_rm(mem, seqId, p0, p1);
+
+  @override
+  void llama_memory_seq_cp(
+    llama_memory_t mem,
+    int seqIdSrc,
+    int seqIdDst,
+    int p0,
+    int p1,
+  ) => _bindings.llama_memory_seq_cp(mem, seqIdSrc, seqIdDst, p0, p1);
 
   @override
   Pointer<Char> llama_model_chat_template(

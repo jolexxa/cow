@@ -69,12 +69,22 @@ class CowBrain {
     required Message userMessage,
     required AgentSettings settings,
     required bool enableReasoning,
+    int sequenceId = 0,
   }) {
     return _harness.runTurn(
       userMessage: userMessage,
       settings: settings,
       enableReasoning: enableReasoning,
+      sequenceId: sequenceId,
     );
+  }
+
+  void createSequence({required int sequenceId, int? forkFrom}) {
+    _harness.createSequence(sequenceId: sequenceId, forkFrom: forkFrom);
+  }
+
+  void destroySequence(int sequenceId) {
+    _harness.destroySequence(sequenceId);
   }
 
   void sendToolResult({
@@ -84,8 +94,8 @@ class CowBrain {
     _harness.sendToolResult(turnId: turnId, toolResult: toolResult);
   }
 
-  void cancel(String turnId) {
-    _harness.cancel(turnId);
+  void cancel({required String turnId, int sequenceId = 0}) {
+    _harness.cancel(turnId: turnId, sequenceId: sequenceId);
   }
 
   void reset() {

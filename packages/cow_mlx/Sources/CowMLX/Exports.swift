@@ -436,6 +436,34 @@ public func cow_mlx_generate_next(
     }
 }
 
+// MARK: - Context Forking
+
+@_cdecl("cow_mlx_fork_context")
+public func cow_mlx_fork_context(_ srcContext: Int32, _ dstContext: Int32) -> Bool {
+    guard let src = contexts.get(srcContext) else {
+        ErrorState.set("Invalid source context handle")
+        return false
+    }
+    guard let dst = contexts.get(dstContext) else {
+        ErrorState.set("Invalid destination context handle")
+        return false
+    }
+
+    do {
+        try runBlocking {
+            try await src.model.container.perform { modelContext in
+                let targetCache = modelContext.model.newCache(parameters: nil)
+                src.copyCacheState(to: dst, targetCache: targetCache)
+            }
+        }
+        ErrorState.clear()
+        return true
+    } catch {
+        ErrorState.set("fork_context failed: \(error)")
+        return false
+    }
+}
+
 // MARK: - KV Cache Management
 
 @_cdecl("cow_mlx_cache_token_count")

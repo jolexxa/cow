@@ -264,7 +264,7 @@ final class TurnActiveState extends ChatState {
 
     on<Cancel>((_) {
       final turnId = data.turnId;
-      if (turnId != null) brain.cancel(turnId);
+      if (turnId != null) brain.cancel(turnId: turnId);
       output(const CancelSummaryRequested());
       _commitTurn();
       return to<ReadyState>();
@@ -272,7 +272,7 @@ final class TurnActiveState extends ChatState {
 
     on<Clear>((_) {
       final turnId = data.turnId;
-      if (turnId != null) brain.cancel(turnId);
+      if (turnId != null) brain.cancel(turnId: turnId);
       data
         ..messages = []
         ..activeTurn = null
@@ -287,7 +287,7 @@ final class TurnActiveState extends ChatState {
 
     on<Reset>((_) {
       final turnId = data.turnId;
-      if (turnId != null) brain.cancel(turnId);
+      if (turnId != null) brain.cancel(turnId: turnId);
       _commitTurn();
       data.messages = [...data.messages, ChatMessage.alert('Session reset.')];
       brain.reset();
@@ -297,7 +297,7 @@ final class TurnActiveState extends ChatState {
 
     on<Dispose>((_) {
       final turnId = data.turnId;
-      if (turnId != null) brain.cancel(turnId);
+      if (turnId != null) brain.cancel(turnId: turnId);
       output(const CancelSummaryRequested());
       return toSelf();
     });

@@ -156,6 +156,7 @@ final class FakeInferenceRuntime implements InferenceRuntime {
     required bool addBos,
     required bool requiresReset,
     required int reusePrefixMessageCount,
+    int sequenceId = 0,
   }) async* {
     lastPrompt = prompt;
     lastAddBos = addBos;
@@ -164,4 +165,13 @@ final class FakeInferenceRuntime implements InferenceRuntime {
       yield StreamChunk(text: chunk, tokenCountDelta: 0);
     }
   }
+
+  @override
+  void createSequence(int sequenceId) {}
+
+  @override
+  void destroySequence(int sequenceId) {}
+
+  @override
+  void forkSequence({required int source, required int target}) {}
 }

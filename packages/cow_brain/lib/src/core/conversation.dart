@@ -31,6 +31,13 @@ final class Conversation {
   List<Message> get messages => _messagesView;
   bool get systemApplied => _systemApplied;
 
+  /// Create a deep copy of this conversation (for sequence forking).
+  Conversation copy() {
+    return Conversation._(List.of(_messages))
+      .._systemApplied = _systemApplied
+      .._turnCounter = _turnCounter;
+  }
+
   String beginTurn() {
     _turnCounter += 1;
     return 'turn-$_turnCounter';

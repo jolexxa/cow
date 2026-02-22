@@ -317,6 +317,7 @@ final class ScriptedInferenceRuntime implements InferenceRuntime {
     required bool addBos,
     required bool requiresReset,
     required int reusePrefixMessageCount,
+    int sequenceId = 0,
   }) async* {
     prompts.add(prompt);
     lastPrompt = prompt;
@@ -327,6 +328,15 @@ final class ScriptedInferenceRuntime implements InferenceRuntime {
     _index += 1;
     yield StreamChunk(text: output, tokenCountDelta: 0);
   }
+
+  @override
+  void createSequence(int sequenceId) {}
+
+  @override
+  void destroySequence(int sequenceId) {}
+
+  @override
+  void forkSequence({required int source, required int target}) {}
 }
 
 final class FakeLlamaClient implements LlamaClientApi {
@@ -621,6 +631,17 @@ final class _NoopBindings implements LlamaBindings {
     Pointer<Char> key,
     Pointer<Char> buf,
     int bufSize,
+  ) {
+    throw UnimplementedError();
+  }
+
+  @override
+  void llama_memory_seq_cp(
+    llama_memory_t mem,
+    int seqIdSrc,
+    int seqIdDst,
+    int p0,
+    int p1,
   ) {
     throw UnimplementedError();
   }

@@ -18,6 +18,7 @@ final class AgentLoop implements AgentRunner {
     required this.contextSize,
     required this.maxOutputTokens,
     required this.temperature,
+    this.sequenceId = 0,
   }) : _llm = llm,
        _tools = tools,
        _context = context;
@@ -26,11 +27,18 @@ final class AgentLoop implements AgentRunner {
   final ToolRegistry _tools;
   final ContextManager _context;
 
+  /// Exposed for sequence forking — shared across sequences.
+  LlmAdapter get llm => _llm;
+
+  /// Exposed for sequence forking — shared across sequences.
+  ToolRegistry get tools => _tools;
+
   @override
   final int contextSize;
   @override
   final int maxOutputTokens;
   final double temperature;
+  final int sequenceId;
 
   // Tracks previous reasoning state to detect toggles requiring context reset.
   bool? _lastEnableReasoning;
@@ -53,7 +61,11 @@ final class AgentLoop implements AgentRunner {
         throw const CancelledException();
       }
       steps += 1;
-      yield AgentStepStarted(turnId: turnId, step: steps);
+      yield AgentStepStarted(
+        sequenceId: sequenceId,
+        turnId: turnId,
+        step: steps,
+      );
 
       final toolDefs = _tools.definitions;
       var slice = _context.prepare(
@@ -96,6 +108,7 @@ final class AgentLoop implements AgentRunner {
       final remainingTokens = slice.remainingTokens;
       var generatedTokens = 0;
       yield AgentTelemetryUpdate(
+        sequenceId: sequenceId,
         turnId: turnId,
         step: steps,
         promptTokens: slice.estimatedPromptTokens,
@@ -107,6 +120,7 @@ final class AgentLoop implements AgentRunner {
       );
       if (slice.droppedMessageCount > 0) {
         yield AgentContextTrimmed(
+          sequenceId: sequenceId,
           turnId: turnId,
           step: steps,
           droppedMessageCount: slice.droppedMessageCount,
@@ -125,6 +139,7 @@ final class AgentLoop implements AgentRunner {
           systemApplied: systemApplied,
           enableReasoning: enableReasoning,
           config: LlmConfig(
+            sequenceId: sequenceId,
             requiresReset: requiresReset,
             reusePrefixMessageCount: reusePrefixMessageCount,
           ),
@@ -139,7 +154,12 @@ final class AgentLoop implements AgentRunner {
                 break;
               }
               textBuffer.write(delta);
-              yield AgentTextDelta(turnId: turnId, step: steps, text: delta);
+              yield AgentTextDelta(
+                sequenceId: sequenceId,
+                turnId: turnId,
+                step: steps,
+                text: delta,
+              );
             case OutputReasoningDelta(:final text):
               var delta = text;
               if (reasoningBuffer.isEmpty) {
@@ -150,6 +170,7 @@ final class AgentLoop implements AgentRunner {
               }
               reasoningBuffer.write(delta);
               yield AgentReasoningDelta(
+                sequenceId: sequenceId,
                 turnId: turnId,
                 step: steps,
                 text: delta,
@@ -166,6 +187,7 @@ final class AgentLoop implements AgentRunner {
                   updatedRemaining = remainingTokens;
                 }
                 yield AgentTelemetryUpdate(
+                  sequenceId: sequenceId,
                   turnId: turnId,
                   step: steps,
                   promptTokens: slice.estimatedPromptTokens,
@@ -196,6 +218,7 @@ final class AgentLoop implements AgentRunner {
         if (toolCalls.isEmpty) {
           convo.appendAssistantText(fullText, reasoning: reasoningOrNull);
           yield AgentStepFinished(
+            sequenceId: sequenceId,
             turnId: turnId,
             step: steps,
             text: fullText,
@@ -203,6 +226,7 @@ final class AgentLoop implements AgentRunner {
             finishReason: finishReason,
           );
           yield AgentTurnFinished(
+            sequenceId: sequenceId,
             turnId: turnId,
             step: steps,
             finishReason: finishReason,
@@ -216,6 +240,7 @@ final class AgentLoop implements AgentRunner {
           reasoning: reasoningOrNull,
         );
         yield AgentToolCalls(
+          sequenceId: sequenceId,
           turnId: turnId,
           step: steps,
           calls: toolCalls,
@@ -231,11 +256,17 @@ final class AgentLoop implements AgentRunner {
         final results = await executor(toolCalls);
         for (final result in results) {
           convo.appendToolResult(result);
-          yield AgentToolResult(turnId: turnId, step: steps, result: result);
+          yield AgentToolResult(
+            sequenceId: sequenceId,
+            turnId: turnId,
+            step: steps,
+            result: result,
+          );
         }
       } on CancelledException {
         convo.setSystemApplied(value: systemApplied);
         yield AgentTurnFinished(
+          sequenceId: sequenceId,
           turnId: turnId,
           step: steps,
           finishReason: FinishReason.cancelled,
@@ -243,8 +274,14 @@ final class AgentLoop implements AgentRunner {
         return;
       } on Object catch (error) {
         convo.setSystemApplied(value: systemApplied);
-        yield AgentError(turnId: turnId, step: steps, error: error.toString());
+        yield AgentError(
+          error: error.toString(),
+          sequenceId: sequenceId,
+          turnId: turnId,
+          step: steps,
+        );
         yield AgentTurnFinished(
+          sequenceId: sequenceId,
           turnId: turnId,
           step: steps,
           finishReason: FinishReason.error,
@@ -254,6 +291,7 @@ final class AgentLoop implements AgentRunner {
     }
 
     yield AgentTurnFinished(
+      sequenceId: sequenceId,
       turnId: turnId,
       step: steps,
       finishReason: FinishReason.maxSteps,

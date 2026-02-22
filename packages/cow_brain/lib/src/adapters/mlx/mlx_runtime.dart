@@ -28,20 +28,25 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
     required MlxClientApi client,
     required MlxBindings bindings,
   }) : _options = options,
-       _client = client {
+       _client = client,
+       _bindings = bindings {
     _handles = MlxHandles.fromModelId(
       modelId: modelId,
       bindings: bindings,
     );
-    _handles.contextHandle = _client.createContext(
-      _handles,
-      options.contextSize,
-    );
+    // Create initial context for sequence 0.
+    final ctx0 = _client.createContext(_handles, options.contextSize);
+    _handles.contextHandle = ctx0;
+    _contextHandles[0] = ctx0;
   }
 
   final MlxRuntimeOptions _options;
   final MlxClientApi _client;
+  final MlxBindings _bindings;
   late final MlxHandles _handles;
+
+  /// Per-sequence context handles. Key = sequenceId, value = native handle.
+  final Map<int, int> _contextHandles = {};
 
   bool _disposed = false;
 
@@ -63,8 +68,13 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
     required bool addBos,
     required bool requiresReset,
     required int reusePrefixMessageCount,
+    int sequenceId = 0,
   }) async* {
     _ensureNotDisposed();
+    _ensureSequenceExists(sequenceId);
+
+    // Temporarily point _handles at this sequence's context.
+    _handles.contextHandle = _contextHandles[sequenceId]!;
 
     if (requiresReset) {
       _client.resetContext(_handles, _options.contextSize);
@@ -157,24 +167,79 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
   }
 
   @override
+  void createSequence(int sequenceId) {
+    _ensureNotDisposed();
+    if (_contextHandles.containsKey(sequenceId)) {
+      throw StateError('Sequence $sequenceId already exists');
+    }
+    final ctx = _client.createContext(_handles, _options.contextSize);
+    _contextHandles[sequenceId] = ctx;
+  }
+
+  @override
+  void destroySequence(int sequenceId) {
+    _ensureNotDisposed();
+    _ensureSequenceExists(sequenceId);
+    final ctx = _contextHandles.remove(sequenceId)!;
+    _bindings.freeContext(ctx);
+  }
+
+  @override
+  void forkSequence({required int source, required int target}) {
+    _ensureNotDisposed();
+    _ensureSequenceExists(source);
+    if (_contextHandles.containsKey(target)) {
+      throw StateError('Target sequence $target already exists');
+    }
+    // Create a new context for the target.
+    final targetCtx = _client.createContext(_handles, _options.contextSize);
+    _contextHandles[target] = targetCtx;
+    // Copy KV cache + cached tokens from source to target via native call.
+    final srcCtx = _contextHandles[source]!;
+    final ok = _bindings.forkContext(srcCtx, targetCtx);
+    if (!ok) {
+      final error = _bindings.getError();
+      _bindings.freeContext(targetCtx);
+      _contextHandles.remove(target);
+      throw StateError('forkContext failed: $error');
+    }
+  }
+
+  @override
   void dispose() {
     if (_disposed) return;
-    if (_handles.contextHandle >= 0) {
-      _handles.bindings.freeContext(_handles.contextHandle);
-      _handles.contextHandle = -1;
-    }
+    _contextHandles.values.forEach(_bindings.freeContext);
+    _contextHandles.clear();
+    _handles.contextHandle = -1;
     _disposed = true;
   }
 
   @override
   void reset() {
     _ensureNotDisposed();
-    _client.resetContext(_handles, _options.contextSize);
+    // Reset all sequences, then keep only sequence 0.
+    for (final entry in _contextHandles.entries) {
+      if (entry.key == 0) {
+        _handles.contextHandle = entry.value;
+        _client.resetContext(_handles, _options.contextSize);
+      } else {
+        _bindings.freeContext(entry.value);
+      }
+    }
+    final ctx0 = _contextHandles[0];
+    _contextHandles.clear();
+    if (ctx0 != null) _contextHandles[0] = ctx0;
   }
 
   void _ensureNotDisposed() {
     if (_disposed) {
       throw StateError('MlxRuntime is already disposed');
+    }
+  }
+
+  void _ensureSequenceExists(int sequenceId) {
+    if (!_contextHandles.containsKey(sequenceId)) {
+      throw StateError('Sequence $sequenceId does not exist');
     }
   }
 

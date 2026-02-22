@@ -160,7 +160,8 @@ void main() {
           )
           .toList();
 
-      expect(client.resetCalls, 1);
+      // Reset now clears KV cache via llama_memory_seq_rm (not resetContext).
+      expect(client.resetCalls, 0);
     });
 
     test('honors stop sequences and control tokens', () async {
@@ -669,7 +670,13 @@ void main() {
             )
             .toList();
 
-        expect(client.resetCalls, 1);
+        // Reset now clears KV cache via llama_memory_seq_rm (not resetContext).
+        expect(client.resetCalls, 0);
+        expect(
+          bindings.memoryRmHistory,
+          isNotEmpty,
+          reason: 'KV cache should be cleared on reset',
+        );
         // BOS re-sent after reset.
         expect(client.addSpecialCalls, [true, true]);
       },
@@ -732,8 +739,8 @@ void main() {
           .toList();
 
       expect(client.addSpecialCalls, [true, false, true]);
-      // Reset was called exactly once (gen3 only, not gen1 or gen2).
-      expect(client.resetCalls, 1);
+      // Reset now clears KV cache via llama_memory_seq_rm (not resetContext).
+      expect(client.resetCalls, 0);
     });
 
     test(

@@ -55,8 +55,8 @@ final class UninitializedState extends BrainIsolateState {
       final config = createConfig(input.request);
 
       data
-        ..maxSteps = config.defaultSettings.maxSteps
-        ..enableReasoning = config.enableReasoningDefault;
+        ..maxSteps[0] = config.defaultSettings.maxSteps
+        ..enableReasoning[0] = config.enableReasoningDefault;
 
       output(StoreConfigRequested(config: config));
       output(const SendEventRequested(event: AgentReady()));
@@ -77,6 +77,14 @@ final class UninitializedState extends BrainIsolateState {
     on<DisposeInput>((_) => to<DisposedState>());
     on<TurnCompleted>((_) => toSelf());
     on<TurnFailed>((_) => toSelf());
+    on<CreateSequenceInput>((_) {
+      output(const SendErrorRequested(message: 'Brain is not initialized.'));
+      return toSelf();
+    });
+    on<DestroySequenceInput>((_) {
+      output(const SendErrorRequested(message: 'Brain is not initialized.'));
+      return toSelf();
+    });
   }
 }
 
@@ -88,8 +96,8 @@ final class IdleState extends BrainIsolateState {
       final newConfig = createConfig(input.request);
 
       data
-        ..maxSteps = newConfig.defaultSettings.maxSteps
-        ..enableReasoning = newConfig.enableReasoningDefault;
+        ..maxSteps[0] = newConfig.defaultSettings.maxSteps
+        ..enableReasoning[0] = newConfig.enableReasoningDefault;
 
       output(StoreConfigRequested(config: newConfig));
       output(const SendEventRequested(event: AgentReady()));
@@ -99,6 +107,7 @@ final class IdleState extends BrainIsolateState {
     on<RunTurnInput>((input) {
       final request = input.request;
       final userMessage = request.userMessage;
+      final seqId = request.sequenceId;
 
       if (userMessage.role != Role.user) {
         output(
@@ -110,13 +119,17 @@ final class IdleState extends BrainIsolateState {
       }
 
       data
-        ..cancelRequested = false
-        ..maxSteps = request.settings.maxSteps
-        ..enableReasoning = request.enableReasoning;
+        ..cancelRequested[seqId] = false
+        ..maxSteps[seqId] = request.settings.maxSteps
+        ..enableReasoning[seqId] = request.enableReasoning
+        ..activeSequences.add(seqId);
 
-      config.conversation.addUser(userMessage.content, name: userMessage.name);
+      config.conversations[seqId]?.addUser(
+        userMessage.content,
+        name: userMessage.name,
+      );
 
-      output(const StreamTurnRequested());
+      output(StreamTurnRequested(sequenceId: seqId));
       return to<TurnActiveState>();
     });
 
@@ -125,11 +138,17 @@ final class IdleState extends BrainIsolateState {
 
     on<ResetInput>((_) {
       data
-        ..cancelRequested = true
-        ..maxSteps = config.defaultSettings.maxSteps
-        ..enableReasoning = config.enableReasoningDefault;
+        ..cancelRequested.clear()
+        ..cancelRequested[0] = false
+        ..maxSteps.clear()
+        ..maxSteps[0] = config.defaultSettings.maxSteps
+        ..enableReasoning.clear()
+        ..enableReasoning[0] = config.enableReasoningDefault;
 
-      config.conversation = Conversation.initial();
+      // Reset all conversations to just sequence 0.
+      config.conversations.clear();
+      config.conversations[0] = Conversation.initial();
+      config.agents.removeWhere((k, _) => k != 0);
 
       output(const ResetRuntimeRequested());
       return toSelf();
@@ -142,6 +161,16 @@ final class IdleState extends BrainIsolateState {
 
     on<TurnCompleted>((_) => toSelf());
     on<TurnFailed>((_) => toSelf());
+
+    on<CreateSequenceInput>((input) {
+      output(CreateSequenceRequested(request: input.request));
+      return toSelf();
+    });
+
+    on<DestroySequenceInput>((input) {
+      output(DestroySequenceRequested(request: input.request));
+      return toSelf();
+    });
   }
 }
 
@@ -152,8 +181,42 @@ final class TurnActiveState extends BrainIsolateState {
       return toSelf();
     });
 
-    on<RunTurnInput>((_) {
-      output(const SendErrorRequested(message: 'Turn already running.'));
+    on<RunTurnInput>((input) {
+      final request = input.request;
+      final seqId = request.sequenceId;
+
+      // Allow concurrent turns on different sequences.
+      if (data.activeSequences.contains(seqId)) {
+        output(
+          SendErrorRequested(
+            message: 'Turn already running on sequence $seqId.',
+          ),
+        );
+        return toSelf();
+      }
+
+      final userMessage = request.userMessage;
+      if (userMessage.role != Role.user) {
+        output(
+          const SendErrorRequested(
+            message: 'run_turn requires a user message.',
+          ),
+        );
+        return toSelf();
+      }
+
+      data
+        ..cancelRequested[seqId] = false
+        ..maxSteps[seqId] = request.settings.maxSteps
+        ..enableReasoning[seqId] = request.enableReasoning
+        ..activeSequences.add(seqId);
+
+      config.conversations[seqId]?.addUser(
+        userMessage.content,
+        name: userMessage.name,
+      );
+
+      output(StreamTurnRequested(sequenceId: seqId));
       return toSelf();
     });
 
@@ -162,27 +225,61 @@ final class TurnActiveState extends BrainIsolateState {
       return toSelf();
     });
 
-    on<CancelInput>((_) {
-      output(const CancelTurnRequested());
+    on<CancelInput>((input) {
+      output(CancelTurnRequested(sequenceId: input.sequenceId));
       return toSelf();
     });
 
     on<ResetInput>((_) {
-      output(const CancelTurnRequested());
+      // Cancel all active turns.
+      for (final seqId in data.activeSequences) {
+        output(CancelTurnRequested(sequenceId: seqId));
+      }
       return toSelf();
     });
 
     on<DisposeInput>((_) {
-      output(const CancelTurnRequested());
+      for (final seqId in data.activeSequences) {
+        output(CancelTurnRequested(sequenceId: seqId));
+      }
       output(const DisposeRuntimeRequested());
       return to<DisposedState>();
     });
 
-    on<TurnCompleted>((_) => to<IdleState>());
+    on<TurnCompleted>((input) {
+      data.activeSequences.remove(input.sequenceId);
+      if (data.activeSequences.isEmpty) {
+        return to<IdleState>();
+      }
+      return toSelf();
+    });
 
     on<TurnFailed>((input) {
+      data.activeSequences.remove(input.sequenceId);
       output(SendErrorRequested(message: input.error));
-      return to<IdleState>();
+      if (data.activeSequences.isEmpty) {
+        return to<IdleState>();
+      }
+      return toSelf();
+    });
+
+    on<CreateSequenceInput>((input) {
+      output(CreateSequenceRequested(request: input.request));
+      return toSelf();
+    });
+
+    on<DestroySequenceInput>((input) {
+      final seqId = input.request.sequenceId;
+      if (data.activeSequences.contains(seqId)) {
+        output(
+          SendErrorRequested(
+            message: 'Cannot destroy sequence $seqId while turn is active.',
+          ),
+        );
+        return toSelf();
+      }
+      output(DestroySequenceRequested(request: input.request));
+      return toSelf();
     });
   }
 }
@@ -197,6 +294,8 @@ final class DisposedState extends BrainIsolateState {
     on<DisposeInput>((_) => toSelf());
     on<TurnCompleted>((_) => toSelf());
     on<TurnFailed>((_) => toSelf());
+    on<CreateSequenceInput>((_) => toSelf());
+    on<DestroySequenceInput>((_) => toSelf());
   }
 }
 

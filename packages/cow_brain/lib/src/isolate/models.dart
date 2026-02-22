@@ -92,6 +92,10 @@ enum BrainRequestType {
   reset,
   @JsonValue('dispose')
   dispose,
+  @JsonValue('create_sequence')
+  createSequence,
+  @JsonValue('destroy_sequence')
+  destroySequence,
 }
 
 @JsonSerializable(explicitToJson: true)
@@ -169,9 +173,11 @@ class LlmConfig {
   const LlmConfig({
     required this.requiresReset,
     required this.reusePrefixMessageCount,
+    this.sequenceId = 0,
   });
   factory LlmConfig.fromJson(Map<String, Object?> json) =>
       _$LlmConfigFromJson(json);
+  final int sequenceId;
   final bool requiresReset;
   final int reusePrefixMessageCount;
   Map<String, Object?> toJson() => _$LlmConfigToJson(this);
@@ -379,9 +385,11 @@ class RunTurnRequest {
     required this.userMessage,
     required this.settings,
     required this.enableReasoning,
+    this.sequenceId = 0,
   });
   factory RunTurnRequest.fromJson(Map<String, Object?> json) =>
       _$RunTurnRequestFromJson(json);
+  final int sequenceId;
   final Message userMessage;
   final AgentSettings settings;
   final bool enableReasoning;
@@ -400,11 +408,34 @@ class ToolResultRequest {
 
 @JsonSerializable()
 class CancelRequest {
-  const CancelRequest({required this.turnId});
+  const CancelRequest({required this.turnId, this.sequenceId = 0});
   factory CancelRequest.fromJson(Map<String, Object?> json) =>
       _$CancelRequestFromJson(json);
+  final int sequenceId;
   final String turnId;
   Map<String, Object?> toJson() => _$CancelRequestToJson(this);
+}
+
+@JsonSerializable()
+class CreateSequenceRequest {
+  const CreateSequenceRequest({
+    required this.sequenceId,
+    this.forkFrom,
+  });
+  factory CreateSequenceRequest.fromJson(Map<String, Object?> json) =>
+      _$CreateSequenceRequestFromJson(json);
+  final int sequenceId;
+  final int? forkFrom;
+  Map<String, Object?> toJson() => _$CreateSequenceRequestToJson(this);
+}
+
+@JsonSerializable()
+class DestroySequenceRequest {
+  const DestroySequenceRequest({required this.sequenceId});
+  factory DestroySequenceRequest.fromJson(Map<String, Object?> json) =>
+      _$DestroySequenceRequestFromJson(json);
+  final int sequenceId;
+  Map<String, Object?> toJson() => _$DestroySequenceRequestToJson(this);
 }
 
 @JsonSerializable(explicitToJson: true)
@@ -415,6 +446,8 @@ class BrainRequest {
     this.runTurn,
     this.toolResult,
     this.cancel,
+    this.createSequence,
+    this.destroySequence,
   });
   factory BrainRequest.fromJson(Map<String, Object?> json) =>
       _$BrainRequestFromJson(json);
@@ -423,6 +456,8 @@ class BrainRequest {
   final RunTurnRequest? runTurn;
   final ToolResultRequest? toolResult;
   final CancelRequest? cancel;
+  final CreateSequenceRequest? createSequence;
+  final DestroySequenceRequest? destroySequence;
   Map<String, Object?> toJson() => _$BrainRequestToJson(this);
 }
 
@@ -445,6 +480,7 @@ sealed class AgentEvent {
     };
   }
   AgentEventType get type;
+  int get sequenceId;
   String? get turnId;
   int? get step;
   Map<String, Object?> toJson();
@@ -452,11 +488,16 @@ sealed class AgentEvent {
 
 @JsonSerializable()
 final class AgentReady extends AgentEvent {
-  const AgentReady({this.type = AgentEventType.ready});
+  const AgentReady({
+    this.sequenceId = 0,
+    this.type = AgentEventType.ready,
+  });
   factory AgentReady.fromJson(Map<String, Object?> json) =>
       _$AgentReadyFromJson(json);
   @override
   final AgentEventType type;
+  @override
+  final int sequenceId;
   @override
   String? get turnId => null;
   @override
@@ -470,12 +511,15 @@ final class AgentStepStarted extends AgentEvent {
   const AgentStepStarted({
     required this.turnId,
     required this.step,
+    this.sequenceId = 0,
     this.type = AgentEventType.stepStarted,
   });
   factory AgentStepStarted.fromJson(Map<String, Object?> json) =>
       _$AgentStepStartedFromJson(json);
   @override
   final AgentEventType type;
+  @override
+  final int sequenceId;
   @override
   final String turnId;
   @override
@@ -490,12 +534,15 @@ final class AgentContextTrimmed extends AgentEvent {
     required this.turnId,
     required this.step,
     required this.droppedMessageCount,
+    this.sequenceId = 0,
     this.type = AgentEventType.contextTrimmed,
   });
   factory AgentContextTrimmed.fromJson(Map<String, Object?> json) =>
       _$AgentContextTrimmedFromJson(json);
   @override
   final AgentEventType type;
+  @override
+  final int sequenceId;
   @override
   final String turnId;
   @override
@@ -516,12 +563,15 @@ final class AgentTelemetryUpdate extends AgentEvent {
     required this.contextSize,
     required this.maxOutputTokens,
     required this.safetyMarginTokens,
+    this.sequenceId = 0,
     this.type = AgentEventType.telemetryUpdate,
   });
   factory AgentTelemetryUpdate.fromJson(Map<String, Object?> json) =>
       _$AgentTelemetryUpdateFromJson(json);
   @override
   final AgentEventType type;
+  @override
+  final int sequenceId;
   @override
   final String turnId;
   @override
@@ -542,12 +592,15 @@ final class AgentTextDelta extends AgentEvent {
     required this.turnId,
     required this.step,
     required this.text,
+    this.sequenceId = 0,
     this.type = AgentEventType.textDelta,
   });
   factory AgentTextDelta.fromJson(Map<String, Object?> json) =>
       _$AgentTextDeltaFromJson(json);
   @override
   final AgentEventType type;
+  @override
+  final int sequenceId;
   @override
   final String turnId;
   @override
@@ -563,12 +616,15 @@ final class AgentReasoningDelta extends AgentEvent {
     required this.turnId,
     required this.step,
     required this.text,
+    this.sequenceId = 0,
     this.type = AgentEventType.reasoningDelta,
   });
   factory AgentReasoningDelta.fromJson(Map<String, Object?> json) =>
       _$AgentReasoningDeltaFromJson(json);
   @override
   final AgentEventType type;
+  @override
+  final int sequenceId;
   @override
   final String turnId;
   @override
@@ -585,6 +641,7 @@ final class AgentToolCalls extends AgentEvent {
     required this.step,
     required this.calls,
     required this.finishReason,
+    this.sequenceId = 0,
     this.preToolText,
     this.preToolReasoning,
     this.type = AgentEventType.toolCalls,
@@ -593,6 +650,8 @@ final class AgentToolCalls extends AgentEvent {
       _$AgentToolCallsFromJson(json);
   @override
   final AgentEventType type;
+  @override
+  final int sequenceId;
   @override
   final String turnId;
   @override
@@ -611,12 +670,15 @@ final class AgentToolResult extends AgentEvent {
     required this.turnId,
     required this.step,
     required this.result,
+    this.sequenceId = 0,
     this.type = AgentEventType.toolResult,
   });
   factory AgentToolResult.fromJson(Map<String, Object?> json) =>
       _$AgentToolResultFromJson(json);
   @override
   final AgentEventType type;
+  @override
+  final int sequenceId;
   @override
   final String turnId;
   @override
@@ -633,6 +695,7 @@ final class AgentStepFinished extends AgentEvent {
     required this.step,
     required this.text,
     required this.finishReason,
+    this.sequenceId = 0,
     this.reasoning,
     this.type = AgentEventType.stepFinished,
   });
@@ -640,6 +703,8 @@ final class AgentStepFinished extends AgentEvent {
       _$AgentStepFinishedFromJson(json);
   @override
   final AgentEventType type;
+  @override
+  final int sequenceId;
   @override
   final String turnId;
   @override
@@ -657,12 +722,15 @@ final class AgentTurnFinished extends AgentEvent {
     required this.turnId,
     required this.step,
     required this.finishReason,
+    this.sequenceId = 0,
     this.type = AgentEventType.turnFinished,
   });
   factory AgentTurnFinished.fromJson(Map<String, Object?> json) =>
       _$AgentTurnFinishedFromJson(json);
   @override
   final AgentEventType type;
+  @override
+  final int sequenceId;
   @override
   final String turnId;
   @override
@@ -676,6 +744,7 @@ final class AgentTurnFinished extends AgentEvent {
 final class AgentError extends AgentEvent {
   const AgentError({
     required this.error,
+    this.sequenceId = 0,
     this.turnId,
     this.step,
     this.type = AgentEventType.error,
@@ -684,6 +753,8 @@ final class AgentError extends AgentEvent {
       _$AgentErrorFromJson(json);
   @override
   final AgentEventType type;
+  @override
+  final int sequenceId;
   @override
   final String? turnId;
   @override

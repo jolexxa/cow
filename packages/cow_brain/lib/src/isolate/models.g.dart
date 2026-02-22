@@ -81,9 +81,11 @@ Map<String, dynamic> _$ToolResultToJson(ToolResult instance) =>
 LlmConfig _$LlmConfigFromJson(Map<String, dynamic> json) => LlmConfig(
   requiresReset: json['requiresReset'] as bool,
   reusePrefixMessageCount: (json['reusePrefixMessageCount'] as num).toInt(),
+  sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
 );
 
 Map<String, dynamic> _$LlmConfigToJson(LlmConfig instance) => <String, dynamic>{
+  'sequenceId': instance.sequenceId,
   'requiresReset': instance.requiresReset,
   'reusePrefixMessageCount': instance.reusePrefixMessageCount,
 };
@@ -271,10 +273,12 @@ RunTurnRequest _$RunTurnRequestFromJson(
   userMessage: Message.fromJson(json['userMessage'] as Map<String, dynamic>),
   settings: AgentSettings.fromJson(json['settings'] as Map<String, dynamic>),
   enableReasoning: json['enableReasoning'] as bool,
+  sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
 );
 
 Map<String, dynamic> _$RunTurnRequestToJson(RunTurnRequest instance) =>
     <String, dynamic>{
+      'sequenceId': instance.sequenceId,
       'userMessage': instance.userMessage.toJson(),
       'settings': instance.settings.toJson(),
       'enableReasoning': instance.enableReasoning,
@@ -295,10 +299,38 @@ Map<String, dynamic> _$ToolResultRequestToJson(ToolResultRequest instance) =>
     };
 
 CancelRequest _$CancelRequestFromJson(Map<String, dynamic> json) =>
-    CancelRequest(turnId: json['turnId'] as String);
+    CancelRequest(
+      turnId: json['turnId'] as String,
+      sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
+    );
 
 Map<String, dynamic> _$CancelRequestToJson(CancelRequest instance) =>
-    <String, dynamic>{'turnId': instance.turnId};
+    <String, dynamic>{
+      'sequenceId': instance.sequenceId,
+      'turnId': instance.turnId,
+    };
+
+CreateSequenceRequest _$CreateSequenceRequestFromJson(
+  Map<String, dynamic> json,
+) => CreateSequenceRequest(
+  sequenceId: (json['sequenceId'] as num).toInt(),
+  forkFrom: (json['forkFrom'] as num?)?.toInt(),
+);
+
+Map<String, dynamic> _$CreateSequenceRequestToJson(
+  CreateSequenceRequest instance,
+) => <String, dynamic>{
+  'sequenceId': instance.sequenceId,
+  'forkFrom': instance.forkFrom,
+};
+
+DestroySequenceRequest _$DestroySequenceRequestFromJson(
+  Map<String, dynamic> json,
+) => DestroySequenceRequest(sequenceId: (json['sequenceId'] as num).toInt());
+
+Map<String, dynamic> _$DestroySequenceRequestToJson(
+  DestroySequenceRequest instance,
+) => <String, dynamic>{'sequenceId': instance.sequenceId};
 
 BrainRequest _$BrainRequestFromJson(Map<String, dynamic> json) => BrainRequest(
   type: $enumDecode(_$BrainRequestTypeEnumMap, json['type']),
@@ -314,6 +346,16 @@ BrainRequest _$BrainRequestFromJson(Map<String, dynamic> json) => BrainRequest(
   cancel: json['cancel'] == null
       ? null
       : CancelRequest.fromJson(json['cancel'] as Map<String, dynamic>),
+  createSequence: json['createSequence'] == null
+      ? null
+      : CreateSequenceRequest.fromJson(
+          json['createSequence'] as Map<String, dynamic>,
+        ),
+  destroySequence: json['destroySequence'] == null
+      ? null
+      : DestroySequenceRequest.fromJson(
+          json['destroySequence'] as Map<String, dynamic>,
+        ),
 );
 
 Map<String, dynamic> _$BrainRequestToJson(BrainRequest instance) =>
@@ -323,6 +365,8 @@ Map<String, dynamic> _$BrainRequestToJson(BrainRequest instance) =>
       'runTurn': instance.runTurn?.toJson(),
       'toolResult': instance.toolResult?.toJson(),
       'cancel': instance.cancel?.toJson(),
+      'createSequence': instance.createSequence?.toJson(),
+      'destroySequence': instance.destroySequence?.toJson(),
     };
 
 const _$BrainRequestTypeEnumMap = {
@@ -332,16 +376,22 @@ const _$BrainRequestTypeEnumMap = {
   BrainRequestType.cancel: 'cancel',
   BrainRequestType.reset: 'reset',
   BrainRequestType.dispose: 'dispose',
+  BrainRequestType.createSequence: 'create_sequence',
+  BrainRequestType.destroySequence: 'destroy_sequence',
 };
 
 AgentReady _$AgentReadyFromJson(Map<String, dynamic> json) => AgentReady(
+  sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
   type:
       $enumDecodeNullable(_$AgentEventTypeEnumMap, json['type']) ??
       AgentEventType.ready,
 );
 
 Map<String, dynamic> _$AgentReadyToJson(AgentReady instance) =>
-    <String, dynamic>{'type': _$AgentEventTypeEnumMap[instance.type]!};
+    <String, dynamic>{
+      'type': _$AgentEventTypeEnumMap[instance.type]!,
+      'sequenceId': instance.sequenceId,
+    };
 
 const _$AgentEventTypeEnumMap = {
   AgentEventType.ready: 'ready',
@@ -361,6 +411,7 @@ AgentStepStarted _$AgentStepStartedFromJson(Map<String, dynamic> json) =>
     AgentStepStarted(
       turnId: json['turnId'] as String,
       step: (json['step'] as num).toInt(),
+      sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
       type:
           $enumDecodeNullable(_$AgentEventTypeEnumMap, json['type']) ??
           AgentEventType.stepStarted,
@@ -369,6 +420,7 @@ AgentStepStarted _$AgentStepStartedFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$AgentStepStartedToJson(AgentStepStarted instance) =>
     <String, dynamic>{
       'type': _$AgentEventTypeEnumMap[instance.type]!,
+      'sequenceId': instance.sequenceId,
       'turnId': instance.turnId,
       'step': instance.step,
     };
@@ -378,6 +430,7 @@ AgentContextTrimmed _$AgentContextTrimmedFromJson(Map<String, dynamic> json) =>
       turnId: json['turnId'] as String,
       step: (json['step'] as num).toInt(),
       droppedMessageCount: (json['droppedMessageCount'] as num).toInt(),
+      sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
       type:
           $enumDecodeNullable(_$AgentEventTypeEnumMap, json['type']) ??
           AgentEventType.contextTrimmed,
@@ -387,6 +440,7 @@ Map<String, dynamic> _$AgentContextTrimmedToJson(
   AgentContextTrimmed instance,
 ) => <String, dynamic>{
   'type': _$AgentEventTypeEnumMap[instance.type]!,
+  'sequenceId': instance.sequenceId,
   'turnId': instance.turnId,
   'step': instance.step,
   'droppedMessageCount': instance.droppedMessageCount,
@@ -403,6 +457,7 @@ AgentTelemetryUpdate _$AgentTelemetryUpdateFromJson(
   contextSize: (json['contextSize'] as num).toInt(),
   maxOutputTokens: (json['maxOutputTokens'] as num).toInt(),
   safetyMarginTokens: (json['safetyMarginTokens'] as num).toInt(),
+  sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
   type:
       $enumDecodeNullable(_$AgentEventTypeEnumMap, json['type']) ??
       AgentEventType.telemetryUpdate,
@@ -412,6 +467,7 @@ Map<String, dynamic> _$AgentTelemetryUpdateToJson(
   AgentTelemetryUpdate instance,
 ) => <String, dynamic>{
   'type': _$AgentEventTypeEnumMap[instance.type]!,
+  'sequenceId': instance.sequenceId,
   'turnId': instance.turnId,
   'step': instance.step,
   'promptTokens': instance.promptTokens,
@@ -427,6 +483,7 @@ AgentTextDelta _$AgentTextDeltaFromJson(Map<String, dynamic> json) =>
       turnId: json['turnId'] as String,
       step: (json['step'] as num).toInt(),
       text: json['text'] as String,
+      sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
       type:
           $enumDecodeNullable(_$AgentEventTypeEnumMap, json['type']) ??
           AgentEventType.textDelta,
@@ -435,6 +492,7 @@ AgentTextDelta _$AgentTextDeltaFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$AgentTextDeltaToJson(AgentTextDelta instance) =>
     <String, dynamic>{
       'type': _$AgentEventTypeEnumMap[instance.type]!,
+      'sequenceId': instance.sequenceId,
       'turnId': instance.turnId,
       'step': instance.step,
       'text': instance.text,
@@ -445,6 +503,7 @@ AgentReasoningDelta _$AgentReasoningDeltaFromJson(Map<String, dynamic> json) =>
       turnId: json['turnId'] as String,
       step: (json['step'] as num).toInt(),
       text: json['text'] as String,
+      sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
       type:
           $enumDecodeNullable(_$AgentEventTypeEnumMap, json['type']) ??
           AgentEventType.reasoningDelta,
@@ -454,6 +513,7 @@ Map<String, dynamic> _$AgentReasoningDeltaToJson(
   AgentReasoningDelta instance,
 ) => <String, dynamic>{
   'type': _$AgentEventTypeEnumMap[instance.type]!,
+  'sequenceId': instance.sequenceId,
   'turnId': instance.turnId,
   'step': instance.step,
   'text': instance.text,
@@ -467,6 +527,7 @@ AgentToolCalls _$AgentToolCallsFromJson(Map<String, dynamic> json) =>
           .map((e) => ToolCall.fromJson(e as Map<String, dynamic>))
           .toList(),
       finishReason: $enumDecode(_$FinishReasonEnumMap, json['finishReason']),
+      sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
       preToolText: json['preToolText'] as String?,
       preToolReasoning: json['preToolReasoning'] as String?,
       type:
@@ -477,6 +538,7 @@ AgentToolCalls _$AgentToolCallsFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$AgentToolCallsToJson(AgentToolCalls instance) =>
     <String, dynamic>{
       'type': _$AgentEventTypeEnumMap[instance.type]!,
+      'sequenceId': instance.sequenceId,
       'turnId': instance.turnId,
       'step': instance.step,
       'calls': instance.calls.map((e) => e.toJson()).toList(),
@@ -499,6 +561,7 @@ AgentToolResult _$AgentToolResultFromJson(Map<String, dynamic> json) =>
       turnId: json['turnId'] as String,
       step: (json['step'] as num).toInt(),
       result: ToolResult.fromJson(json['result'] as Map<String, dynamic>),
+      sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
       type:
           $enumDecodeNullable(_$AgentEventTypeEnumMap, json['type']) ??
           AgentEventType.toolResult,
@@ -507,6 +570,7 @@ AgentToolResult _$AgentToolResultFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$AgentToolResultToJson(AgentToolResult instance) =>
     <String, dynamic>{
       'type': _$AgentEventTypeEnumMap[instance.type]!,
+      'sequenceId': instance.sequenceId,
       'turnId': instance.turnId,
       'step': instance.step,
       'result': instance.result.toJson(),
@@ -518,6 +582,7 @@ AgentStepFinished _$AgentStepFinishedFromJson(Map<String, dynamic> json) =>
       step: (json['step'] as num).toInt(),
       text: json['text'] as String,
       finishReason: $enumDecode(_$FinishReasonEnumMap, json['finishReason']),
+      sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
       reasoning: json['reasoning'] as String?,
       type:
           $enumDecodeNullable(_$AgentEventTypeEnumMap, json['type']) ??
@@ -527,6 +592,7 @@ AgentStepFinished _$AgentStepFinishedFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$AgentStepFinishedToJson(AgentStepFinished instance) =>
     <String, dynamic>{
       'type': _$AgentEventTypeEnumMap[instance.type]!,
+      'sequenceId': instance.sequenceId,
       'turnId': instance.turnId,
       'step': instance.step,
       'text': instance.text,
@@ -539,6 +605,7 @@ AgentTurnFinished _$AgentTurnFinishedFromJson(Map<String, dynamic> json) =>
       turnId: json['turnId'] as String,
       step: (json['step'] as num).toInt(),
       finishReason: $enumDecode(_$FinishReasonEnumMap, json['finishReason']),
+      sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
       type:
           $enumDecodeNullable(_$AgentEventTypeEnumMap, json['type']) ??
           AgentEventType.turnFinished,
@@ -547,6 +614,7 @@ AgentTurnFinished _$AgentTurnFinishedFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$AgentTurnFinishedToJson(AgentTurnFinished instance) =>
     <String, dynamic>{
       'type': _$AgentEventTypeEnumMap[instance.type]!,
+      'sequenceId': instance.sequenceId,
       'turnId': instance.turnId,
       'step': instance.step,
       'finishReason': _$FinishReasonEnumMap[instance.finishReason]!,
@@ -554,6 +622,7 @@ Map<String, dynamic> _$AgentTurnFinishedToJson(AgentTurnFinished instance) =>
 
 AgentError _$AgentErrorFromJson(Map<String, dynamic> json) => AgentError(
   error: json['error'] as String,
+  sequenceId: (json['sequenceId'] as num?)?.toInt() ?? 0,
   turnId: json['turnId'] as String?,
   step: (json['step'] as num?)?.toInt(),
   type:
@@ -564,6 +633,7 @@ AgentError _$AgentErrorFromJson(Map<String, dynamic> json) => AgentError(
 Map<String, dynamic> _$AgentErrorToJson(AgentError instance) =>
     <String, dynamic>{
       'type': _$AgentEventTypeEnumMap[instance.type]!,
+      'sequenceId': instance.sequenceId,
       'turnId': instance.turnId,
       'step': instance.step,
       'error': instance.error,

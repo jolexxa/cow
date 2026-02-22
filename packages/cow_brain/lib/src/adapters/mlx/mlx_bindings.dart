@@ -60,6 +60,8 @@ abstract class MlxBindings {
 
   int cacheTrimEnd(int contextHandle, int n);
   int cacheTrimFront(int contextHandle, int n);
+
+  bool forkContext(int srcContext, int dstContext);
 }
 
 /// Concrete adapter delegating to [CowMlxBindings].
@@ -170,6 +172,10 @@ final class MlxBindingsAdapter implements MlxBindings {
   @override
   int cacheTrimFront(int contextHandle, int n) =>
       _ffi.cow_mlx_cache_trim_front(contextHandle, n);
+
+  @override
+  bool forkContext(int srcContext, int dstContext) =>
+      _ffi.cow_mlx_fork_context(srcContext, dstContext);
 }
 
 // coverage:ignore-end

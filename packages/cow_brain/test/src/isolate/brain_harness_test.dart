@@ -46,6 +46,8 @@ void _fakeBrainIsolate(SendPort sendPort) {
       case BrainRequestType.toolResult:
       case BrainRequestType.reset:
       case BrainRequestType.dispose:
+      case BrainRequestType.createSequence:
+      case BrainRequestType.destroySequence:
         return;
     }
   });
@@ -102,6 +104,8 @@ void _slowBrainIsolate(SendPort sendPort) {
       case BrainRequestType.toolResult:
       case BrainRequestType.reset:
       case BrainRequestType.dispose:
+      case BrainRequestType.createSequence:
+      case BrainRequestType.destroySequence:
         return;
     }
   });
@@ -191,7 +195,7 @@ void main() {
     test('reset/cancel/toolResult require init', () {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
       expect(harness.reset, throwsStateError);
-      expect(() => harness.cancel('turn-1'), throwsStateError);
+      expect(() => harness.cancel(turnId: 'turn-1'), throwsStateError);
       expect(
         () => harness.sendToolResult(
           turnId: 'turn-1',

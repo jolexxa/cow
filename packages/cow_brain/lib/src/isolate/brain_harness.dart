@@ -21,9 +21,11 @@ final class BrainHarness {
   late Isolate _isolate;
   late SendPort _sendPort;
   bool _disposed = false;
-  bool _turnActive = false;
   bool _started = false;
   bool _initialized = false;
+
+  /// Tracks which sequences currently have an active turn.
+  final Set<int> _activeSequences = {};
 
   Stream<AgentEvent> get events => _events.stream;
 
@@ -68,18 +70,20 @@ final class BrainHarness {
     required Message userMessage,
     required AgentSettings settings,
     required bool enableReasoning,
+    int sequenceId = 0,
   }) {
     _ensureNotDisposed();
     _ensureReady();
-    if (_turnActive) {
-      throw StateError('Turn already running.');
+    if (_activeSequences.contains(sequenceId)) {
+      throw StateError('Turn already running on sequence $sequenceId.');
     }
-    _turnActive = true;
+    _activeSequences.add(sequenceId);
 
     _send(
       BrainRequest(
         type: BrainRequestType.runTurn,
         runTurn: RunTurnRequest(
+          sequenceId: sequenceId,
           userMessage: userMessage,
           settings: settings,
           enableReasoning: enableReasoning,
@@ -92,17 +96,20 @@ final class BrainHarness {
     late final StreamSubscription<AgentEvent> sub;
     sub = _events.stream.listen(
       (event) {
+        // Only route events for this sequence.
+        if (event.sequenceId != sequenceId) return;
+
         turnId ??= event.turnId;
         if (turnId != null && event.turnId == turnId) {
           controller.add(event);
           if (event.type == AgentEventType.turnFinished) {
-            _turnActive = false;
+            _activeSequences.remove(sequenceId);
             unawaited(controller.close());
             unawaited(sub.cancel());
           }
         } else if (event.type == AgentEventType.error && turnId == null) {
           controller.add(event);
-          _turnActive = false;
+          _activeSequences.remove(sequenceId);
           unawaited(controller.close());
           unawaited(sub.cancel());
         }
@@ -130,13 +137,38 @@ final class BrainHarness {
     );
   }
 
-  void cancel(String turnId) {
+  void cancel({required String turnId, int sequenceId = 0}) {
     _ensureNotDisposed();
     _ensureReady();
     _send(
       BrainRequest(
         type: BrainRequestType.cancel,
-        cancel: CancelRequest(turnId: turnId),
+        cancel: CancelRequest(sequenceId: sequenceId, turnId: turnId),
+      ),
+    );
+  }
+
+  void createSequence({required int sequenceId, int? forkFrom}) {
+    _ensureNotDisposed();
+    _ensureReady();
+    _send(
+      BrainRequest(
+        type: BrainRequestType.createSequence,
+        createSequence: CreateSequenceRequest(
+          sequenceId: sequenceId,
+          forkFrom: forkFrom,
+        ),
+      ),
+    );
+  }
+
+  void destroySequence(int sequenceId) {
+    _ensureNotDisposed();
+    _ensureReady();
+    _send(
+      BrainRequest(
+        type: BrainRequestType.destroySequence,
+        destroySequence: DestroySequenceRequest(sequenceId: sequenceId),
       ),
     );
   }
@@ -144,6 +176,7 @@ final class BrainHarness {
   void reset() {
     _ensureNotDisposed();
     _ensureReady();
+    _activeSequences.clear();
     _send(const BrainRequest(type: BrainRequestType.reset));
   }
 
@@ -194,7 +227,7 @@ final class BrainHarness {
   }
 
   void _handleIsolateDeath(String details) {
-    _turnActive = false;
+    _activeSequences.clear();
     if (!_events.isClosed) {
       _events.addError(StateError(details));
     }

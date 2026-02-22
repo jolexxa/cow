@@ -244,4 +244,17 @@ final class FakeMlxBindings implements MlxBindings {
     lastCacheTrimFrontN = n;
     return cacheTrimFrontResult;
   }
+
+  // -- Multi-sequence support --
+
+  bool forkContextResult = true;
+  int forkContextCalls = 0;
+  (int, int)? lastForkContextArgs;
+
+  @override
+  bool forkContext(int srcContext, int dstContext) {
+    forkContextCalls++;
+    lastForkContextArgs = (srcContext, dstContext);
+    return forkContextResult;
+  }
 }

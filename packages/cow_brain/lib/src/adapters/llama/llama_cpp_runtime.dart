@@ -48,8 +48,8 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
   late final LlamaHandles _handles;
 
   bool _disposed = false;
-  bool _bosApplied = false;
-  List<int> _cachedTokens = [];
+  final Map<int, bool> _bosApplied = {0: false};
+  final Map<int, List<int>> _cachedTokens = {0: []};
 
   /// Reads the chat template from the loaded model's GGUF metadata.
   ///
@@ -66,10 +66,12 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
   @override
   int countTokens(String prompt, {required bool addBos}) {
     _ensureNotDisposed();
+    // Use sequence 0's bos state for budget estimation.
+    final bos = _bosApplied[0] ?? false;
     final tokens = _client.tokenize(
       _handles,
       prompt,
-      addSpecial: addBos && !_bosApplied,
+      addSpecial: addBos && !bos,
     );
     return tokens.length;
   }
@@ -81,49 +83,65 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
     required bool addBos,
     required bool requiresReset,
     required int reusePrefixMessageCount,
+    int sequenceId = 0,
   }) async* {
     _ensureNotDisposed();
+    _ensureSequenceExists(sequenceId);
 
     if (requiresReset) {
-      _client.resetContext(_handles, _options.contextOptions);
-      _bosApplied = false;
-      _cachedTokens = [];
+      _resetSequence(sequenceId);
     }
 
+    final seqBos = _bosApplied[sequenceId]!;
     final promptTokens = _client.tokenize(
       _handles,
       prompt,
-      addSpecial: addBos && !_bosApplied,
+      addSpecial: addBos && !seqBos,
     );
     if (addBos) {
-      _bosApplied = true;
+      _bosApplied[sequenceId] = true;
     }
 
+    final seqCached = _cachedTokens[sequenceId]!;
+
     // Find common prefix between cached and new prompt tokens.
-    final commonPrefixLen = _commonPrefixLength(promptTokens);
+    final commonPrefixLen = _commonPrefixLengthFor(promptTokens, seqCached);
 
     // Trim diverged tokens from the KV cache.
-    if (commonPrefixLen < _cachedTokens.length) {
+    if (commonPrefixLen < seqCached.length) {
       final b = _handles.bindings;
       final mem = b.llama_get_memory(_handles.context);
-      final posMax = b.llama_memory_seq_pos_max(mem, 0);
+      final posMax = b.llama_memory_seq_pos_max(mem, sequenceId);
       if (posMax >= commonPrefixLen) {
-        b.llama_memory_seq_rm(mem, 0, commonPrefixLen, posMax + 1);
+        b.llama_memory_seq_rm(
+          mem,
+          sequenceId,
+          commonPrefixLen,
+          posMax + 1,
+        );
       }
-      _cachedTokens = _cachedTokens.sublist(0, commonPrefixLen);
+      _cachedTokens[sequenceId] = seqCached.sublist(0, commonPrefixLen);
     }
 
     final newTokens = promptTokens.sublist(commonPrefixLen);
 
     final maxOutputTokens = _options.maxOutputTokensDefault;
-    final dropped = _ensureRoomFor(newTokens.length, maxOutputTokens);
+    final dropped = _ensureRoomFor(
+      sequenceId,
+      newTokens.length,
+      maxOutputTokens,
+    );
     if (dropped > 0) {
-      _cachedTokens = dropped >= _cachedTokens.length
+      final current = _cachedTokens[sequenceId]!;
+      _cachedTokens[sequenceId] = dropped >= current.length
           ? []
-          : _cachedTokens.sublist(dropped);
+          : current.sublist(dropped);
     }
     _decodeTokens(newTokens);
-    _cachedTokens = [..._cachedTokens, ...newTokens];
+    _cachedTokens[sequenceId] = [
+      ..._cachedTokens[sequenceId]!,
+      ...newTokens,
+    ];
 
     final temperature = _options.samplingOptions.temperature ?? 0.7;
     final samplingOptions = SamplingOptions(
@@ -156,7 +174,7 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
         }
 
         _client.decode(_handles, _handles.context, <int>[token]);
-        _cachedTokens.add(token);
+        _cachedTokens[sequenceId]!.add(token);
 
         if (b.llama_vocab_is_control(_handles.vocab, token)) {
           final chunk = assembler.addEmptyToken();
@@ -227,11 +245,70 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
   }
 
   @override
+  void createSequence(int sequenceId) {
+    _ensureNotDisposed();
+    if (_cachedTokens.containsKey(sequenceId)) {
+      throw StateError('Sequence $sequenceId already exists');
+    }
+    _cachedTokens[sequenceId] = [];
+    _bosApplied[sequenceId] = false;
+  }
+
+  @override
+  void destroySequence(int sequenceId) {
+    _ensureNotDisposed();
+    _ensureSequenceExists(sequenceId);
+    // Remove KV cache for this sequence.
+    final b = _handles.bindings;
+    final mem = b.llama_get_memory(_handles.context);
+    final posMin = b.llama_memory_seq_pos_min(mem, sequenceId);
+    final posMax = b.llama_memory_seq_pos_max(mem, sequenceId);
+    if (posMin >= 0 && posMax >= posMin) {
+      b.llama_memory_seq_rm(mem, sequenceId, posMin, posMax + 1);
+    }
+    _cachedTokens.remove(sequenceId);
+    _bosApplied.remove(sequenceId);
+  }
+
+  @override
+  void forkSequence({required int source, required int target}) {
+    _ensureNotDisposed();
+    _ensureSequenceExists(source);
+    if (_cachedTokens.containsKey(target)) {
+      throw StateError('Target sequence $target already exists');
+    }
+    // Copy KV cache from source to target.
+    final b = _handles.bindings;
+    final mem = b.llama_get_memory(_handles.context);
+    final posMin = b.llama_memory_seq_pos_min(mem, source);
+    final posMax = b.llama_memory_seq_pos_max(mem, source);
+    if (posMin >= 0 && posMax >= posMin) {
+      b.llama_memory_seq_cp(mem, source, target, posMin, posMax + 1);
+    }
+    _cachedTokens[target] = List<int>.of(_cachedTokens[source]!);
+    _bosApplied[target] = _bosApplied[source]!;
+  }
+
+  @override
   void reset() {
     _ensureNotDisposed();
     _client.resetContext(_handles, _options.contextOptions);
-    _bosApplied = false;
-    _cachedTokens = [];
+    _cachedTokens.clear();
+    _bosApplied.clear();
+    _cachedTokens[0] = [];
+    _bosApplied[0] = false;
+  }
+
+  void _resetSequence(int sequenceId) {
+    final b = _handles.bindings;
+    final mem = b.llama_get_memory(_handles.context);
+    final posMin = b.llama_memory_seq_pos_min(mem, sequenceId);
+    final posMax = b.llama_memory_seq_pos_max(mem, sequenceId);
+    if (posMin >= 0 && posMax >= posMin) {
+      b.llama_memory_seq_rm(mem, sequenceId, posMin, posMax + 1);
+    }
+    _cachedTokens[sequenceId] = [];
+    _bosApplied[sequenceId] = false;
   }
 
   void _ensureNotDisposed() {
@@ -240,12 +317,22 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
     }
   }
 
-  int _ensureRoomFor(int promptTokens, int maxOutputTokens) {
+  void _ensureSequenceExists(int sequenceId) {
+    if (!_cachedTokens.containsKey(sequenceId)) {
+      throw StateError('Sequence $sequenceId does not exist');
+    }
+  }
+
+  int _ensureRoomFor(
+    int sequenceId,
+    int promptTokens,
+    int maxOutputTokens,
+  ) {
     final b = _handles.bindings;
     final mem = b.llama_get_memory(_handles.context);
 
-    final posMin = b.llama_memory_seq_pos_min(mem, 0);
-    final posMax = b.llama_memory_seq_pos_max(mem, 0);
+    final posMin = b.llama_memory_seq_pos_min(mem, sequenceId);
+    final posMax = b.llama_memory_seq_pos_max(mem, sequenceId);
     final currentTokens = (posMin >= 0 && posMax >= posMin)
         ? (posMax - posMin + 1)
         : 0;
@@ -268,23 +355,28 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
 
     final tokensToDrop = projectedTotal - _options.contextOptions.contextSize;
     if (tokensToDrop >= currentTokens) {
-      b.llama_memory_seq_rm(mem, 0, posMin, posMax + 1);
+      b.llama_memory_seq_rm(mem, sequenceId, posMin, posMax + 1);
       return currentTokens;
     }
 
     final dropStart = posMin;
     final dropEnd = posMin + tokensToDrop;
-    final removed = b.llama_memory_seq_rm(mem, 0, dropStart, dropEnd);
+    final removed = b.llama_memory_seq_rm(
+      mem,
+      sequenceId,
+      dropStart,
+      dropEnd,
+    );
     if (!removed) {
       throw StateError('Failed to drop tokens from llama memory');
     }
     return tokensToDrop;
   }
 
-  int _commonPrefixLength(List<int> tokens) {
-    final limit = min(tokens.length, _cachedTokens.length);
+  int _commonPrefixLengthFor(List<int> tokens, List<int> cached) {
+    final limit = min(tokens.length, cached.length);
     for (var i = 0; i < limit; i++) {
-      if (tokens[i] != _cachedTokens[i]) return i;
+      if (tokens[i] != cached[i]) return i;
     }
     return limit;
   }

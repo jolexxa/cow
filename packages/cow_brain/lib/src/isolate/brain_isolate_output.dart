@@ -19,11 +19,13 @@ final class SendErrorRequested extends BrainIsolateOutput {
 }
 
 final class StreamTurnRequested extends BrainIsolateOutput {
-  const StreamTurnRequested();
+  const StreamTurnRequested({this.sequenceId = 0});
+  final int sequenceId;
 }
 
 final class CancelTurnRequested extends BrainIsolateOutput {
-  const CancelTurnRequested();
+  const CancelTurnRequested({this.sequenceId = 0});
+  final int sequenceId;
 }
 
 final class DisposeRuntimeRequested extends BrainIsolateOutput {
@@ -42,4 +44,14 @@ final class CompleteToolResultRequested extends BrainIsolateOutput {
 final class StoreConfigRequested extends BrainIsolateOutput {
   const StoreConfigRequested({required this.config});
   final BrainIsolateConfig config;
+}
+
+final class CreateSequenceRequested extends BrainIsolateOutput {
+  const CreateSequenceRequested({required this.request});
+  final CreateSequenceRequest request;
+}
+
+final class DestroySequenceRequested extends BrainIsolateOutput {
+  const DestroySequenceRequested({required this.request});
+  final DestroySequenceRequest request;
 }

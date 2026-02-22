@@ -345,4 +345,21 @@ final class FakeLlamaBindings implements LlamaBindings {
   ) {
     return metaValStrImpl?.call(model, key, buf, bufSize) ?? -1;
   }
+
+  // -- Multi-sequence support --
+
+  int memorySeqCpCalls = 0;
+  (llama_memory_t, int, int, int, int)? lastMemorySeqCpArgs;
+
+  @override
+  void llama_memory_seq_cp(
+    llama_memory_t mem,
+    int seqIdSrc,
+    int seqIdDst,
+    int p0,
+    int p1,
+  ) {
+    memorySeqCpCalls++;
+    lastMemorySeqCpArgs = (mem, seqIdSrc, seqIdDst, p0, p1);
+  }
 }

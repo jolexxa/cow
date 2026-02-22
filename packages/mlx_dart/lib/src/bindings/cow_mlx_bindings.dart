@@ -381,6 +381,18 @@ class CowMlxBindings {
       );
   late final _cow_mlx_cache_trim_front = _cow_mlx_cache_trim_frontPtr
       .asFunction<int Function(int, int)>();
+
+  /// Fork context: copy KV cache + cached tokens from source to destination.
+  bool cow_mlx_fork_context(int srcContext, int dstContext) {
+    return _cow_mlx_fork_context(srcContext, dstContext);
+  }
+
+  late final _cow_mlx_fork_contextPtr =
+      _lookup<ffi.NativeFunction<ffi.Bool Function(ffi.Int32, ffi.Int32)>>(
+        'cow_mlx_fork_context',
+      );
+  late final _cow_mlx_fork_context = _cow_mlx_fork_contextPtr
+      .asFunction<bool Function(int, int)>();
 }
 
 typedef cow_mlx_progress_fnFunction =

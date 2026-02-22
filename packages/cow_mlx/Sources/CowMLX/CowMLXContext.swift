@@ -1,4 +1,5 @@
 import Foundation
+@preconcurrency import MLX
 import MLXLMCommon
 
 /// Mutable box wrapping the value-type `TokenIterator` so it can be
@@ -57,6 +58,30 @@ final class CowMLXContext: @unchecked Sendable {
             actual = c.trim(n)
         }
         return actual
+    }
+
+    /// Copy KV cache state and cached tokens to another context.
+    /// [targetCache] must be freshly created (e.g. via model.newCache()).
+    func copyCacheState(to target: CowMLXContext, targetCache: [KVCache]) {
+        target.cachedTokens = cachedTokens
+        target.stopTokenIds = stopTokenIds
+
+        guard let sourceCache = cache else {
+            target.cache = nil
+            return
+        }
+
+        // Copy each layer's state arrays from source to target.
+        // MLX arrays are lazy graph nodes — referencing them is safe;
+        // future ops create new arrays rather than mutating in place.
+        var mutableCache = targetCache
+        for i in sourceCache.indices where i < mutableCache.count {
+            let s = sourceCache[i].state
+            guard s.count == 2 else { continue }
+            mutableCache[i].state = [s[0], s[1]]
+        }
+
+        target.cache = mutableCache
     }
 
     /// Trim n tokens from the FRONT of the KV cache (sliding window eviction).
