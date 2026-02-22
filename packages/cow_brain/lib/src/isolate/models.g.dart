@@ -110,6 +110,7 @@ LlamaCppRuntimeOptions _$LlamaCppRuntimeOptionsFromJson(
         ),
   maxOutputTokensDefault:
       (json['maxOutputTokensDefault'] as num?)?.toInt() ?? 512,
+  maxSequences: (json['maxSequences'] as num?)?.toInt() ?? 1,
   backend:
       $enumDecodeNullable(_$InferenceBackendEnumMap, json['backend']) ??
       InferenceBackend.llamaCpp,
@@ -124,6 +125,7 @@ Map<String, dynamic> _$LlamaCppRuntimeOptionsToJson(
   'contextOptions': instance.contextOptions.toJson(),
   'samplingOptions': instance.samplingOptions.toJson(),
   'maxOutputTokensDefault': instance.maxOutputTokensDefault,
+  'maxSequences': instance.maxSequences,
   'libraryPath': instance.libraryPath,
 };
 
@@ -207,6 +209,7 @@ MlxRuntimeOptions _$MlxRuntimeOptionsFromJson(Map<String, dynamic> json) =>
             ),
       maxOutputTokensDefault:
           (json['maxOutputTokensDefault'] as num?)?.toInt() ?? 512,
+      maxSequences: (json['maxSequences'] as num?)?.toInt() ?? 1,
       backend:
           $enumDecodeNullable(_$InferenceBackendEnumMap, json['backend']) ??
           InferenceBackend.mlx,
@@ -220,6 +223,7 @@ Map<String, dynamic> _$MlxRuntimeOptionsToJson(MlxRuntimeOptions instance) =>
       'contextSize': instance.contextSize,
       'samplingOptions': instance.samplingOptions.toJson(),
       'maxOutputTokensDefault': instance.maxOutputTokensDefault,
+      'maxSequences': instance.maxSequences,
     };
 
 AgentSettings _$AgentSettingsFromJson(Map<String, dynamic> json) =>

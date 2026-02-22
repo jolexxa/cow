@@ -206,6 +206,48 @@ final class FakeLlamaBindings implements LlamaBindings {
     return batch;
   }
 
+  int batchInitCalls = 0;
+  int batchFreeCalls = 0;
+  final List<Pointer<NativeType>> _batchAllocations = [];
+
+  @override
+  llama_batch llama_batch_init(int nTokens, int embd, int nSeqMax) {
+    batchInitCalls++;
+    // Allocate a real llama_batch struct with usable internal arrays.
+    final batchPtr = calloc<llama_batch>();
+    final b = batchPtr.ref;
+    final tokenPtr = calloc<llama_token>(nTokens);
+    final posPtr = calloc<llama_pos>(nTokens);
+    final nSeqIdPtr = calloc<Int32>(nTokens);
+    final seqIdPtr = calloc<Pointer<llama_seq_id>>(nTokens);
+    final logitsPtr = calloc<Int8>(nTokens);
+    for (var i = 0; i < nTokens; i++) {
+      seqIdPtr[i] = calloc<llama_seq_id>(nSeqMax);
+      _batchAllocations.add(seqIdPtr[i]);
+    }
+    b
+      ..token = tokenPtr
+      ..pos = posPtr
+      ..n_seq_id = nSeqIdPtr
+      ..seq_id = seqIdPtr
+      ..logits = logitsPtr
+      ..n_tokens = 0;
+    _batchAllocations.addAll([
+      batchPtr,
+      tokenPtr,
+      posPtr,
+      nSeqIdPtr,
+      seqIdPtr,
+      logitsPtr,
+    ]);
+    return b;
+  }
+
+  @override
+  void llama_batch_free(llama_batch batch) {
+    batchFreeCalls++;
+  }
+
   @override
   int llama_decode(Pointer<llama_context> ctx, llama_batch batch) {
     decodeCalls += 1;

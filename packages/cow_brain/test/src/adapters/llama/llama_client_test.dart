@@ -375,6 +375,23 @@ void main() {
       expect(handles.model, isNot(equals(nullptr)));
     });
 
+    test('sampleAt delegates to the sampler with batch index', () {
+      bindings.samplerSampleResult = 99;
+
+      final client = _client();
+      final handles = _handles(client);
+
+      final sampler = LlamaSamplerChain.build(
+        bindings,
+        const SamplingOptions(),
+      );
+
+      final value = client.sampleAt(handles, sampler, 3);
+      expect(value, 99);
+      expect(bindings.samplerSampleCalls, 1);
+      sampler.dispose();
+    });
+
     test('modelPointerAddress returns model address', () {
       final client = _client();
       final handles = _handles(client);

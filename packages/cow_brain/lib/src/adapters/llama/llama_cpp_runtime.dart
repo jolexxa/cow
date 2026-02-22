@@ -7,6 +7,7 @@ import 'dart:ffi';
 import 'dart:math' show min;
 
 import 'package:cow_brain/src/adapters/inference_adapter.dart';
+import 'package:cow_brain/src/adapters/llama/llama_batch_decoder.dart';
 import 'package:cow_brain/src/adapters/llama/llama_bindings.dart';
 import 'package:cow_brain/src/adapters/llama/llama_client.dart';
 import 'package:cow_brain/src/adapters/llama/llama_handles.dart';
@@ -37,15 +38,24 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
       modelPointer: modelPointer,
       bindings: bindings,
     );
-    _handles.context = _client.createContext(_handles, options.contextOptions);
+    _handles.context = _client.createContext(
+      _handles,
+      options.contextOptions,
+      maxSequences: options.maxSequences,
+    );
     if (_handles.context == nullptr) {
       throw StateError('Failed to create llama context');
     }
+    _batchDecoder = LlamaBatchDecoder(
+      client: _client,
+      handles: _handles,
+    );
   }
 
   final LlamaCppRuntimeOptions _options;
   final LlamaClientApi _client;
   late final LlamaHandles _handles;
+  late final LlamaBatchDecoder _batchDecoder;
 
   bool _disposed = false;
   final Map<int, bool> _bosApplied = {0: false};
@@ -137,7 +147,7 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
           ? []
           : current.sublist(dropped);
     }
-    _decodeTokens(newTokens);
+    _decodeTokens(newTokens, sequenceId: sequenceId);
     _cachedTokens[sequenceId] = [
       ..._cachedTokens[sequenceId]!,
       ...newTokens,
@@ -165,22 +175,34 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
       allowMalformed: true,
     ).startChunkedConversion(chunkSink);
 
+    int? lastBatchIndex;
+
     try {
       for (var i = 0; i < maxOutputTokens; i += 1) {
-        final token = _client.sampleNext(_handles, sampler);
+        // Sample from the correct logit position: explicit batch index
+        // after batched decode, or -1 (last position) after prefill.
+        final token = lastBatchIndex != null
+            ? _client.sampleAt(_handles, sampler, lastBatchIndex)
+            : _client.sampleNext(_handles, sampler);
+
         final b = _handles.bindings;
         if (b.llama_vocab_is_eog(_handles.vocab, token)) {
           break;
         }
 
-        _client.decode(_handles, _handles.context, <int>[token]);
+        // Submit token for batched decode. This awaits dispatch, which
+        // naturally yields to the event loop (replacing _asyncBoundary).
+        final result = await _batchDecoder.submitToken(
+          token: token,
+          sequenceId: sequenceId,
+        );
+        lastBatchIndex = result.batchIndex;
         _cachedTokens[sequenceId]!.add(token);
 
         if (b.llama_vocab_is_control(_handles.vocab, token)) {
           final chunk = assembler.addEmptyToken();
           if (chunk != null) {
             yield chunk;
-            await _asyncBoundary();
           }
           continue;
         }
@@ -189,7 +211,6 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
           final chunk = assembler.addEmptyToken();
           if (chunk != null) {
             yield chunk;
-            await _asyncBoundary();
           }
           continue;
         }
@@ -198,7 +219,6 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
           final chunk = assembler.addEmptyToken(); // coverage:ignore-line
           if (chunk != null) {
             yield chunk; // coverage:ignore-line
-            await _asyncBoundary(); // coverage:ignore-line
           }
           continue;
         }
@@ -207,7 +227,6 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
           final chunk = assembler.addEmptyToken();
           if (chunk != null) {
             yield chunk; // coverage:ignore-line
-            await _asyncBoundary(); // coverage:ignore-line
           }
           continue;
         }
@@ -215,7 +234,6 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
         final chunk = assembler.addText(piece);
         if (chunk != null) {
           yield chunk;
-          await _asyncBoundary();
         }
         if (assembler.stopped) break;
       }
@@ -229,7 +247,6 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
 
     for (final chunk in assembler.flush()) {
       yield chunk;
-      await _asyncBoundary();
     }
   }
 
@@ -381,22 +398,31 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
     return limit;
   }
 
-  void _decodeTokens(List<int> tokens) {
+  void _decodeTokens(List<int> tokens, {required int sequenceId}) {
     if (tokens.isEmpty) {
       return;
     }
     final maxBatch = _options.contextOptions.nBatch;
     if (tokens.length <= maxBatch) {
-      _client.decode(_handles, _handles.context, tokens);
+      _client.decode(
+        _handles,
+        _handles.context,
+        tokens,
+        sequenceId: sequenceId,
+      );
       return;
     }
     for (var i = 0; i < tokens.length; i += maxBatch) {
       final end = (i + maxBatch < tokens.length) ? i + maxBatch : tokens.length;
-      _client.decode(_handles, _handles.context, tokens.sublist(i, end));
+      _client.decode(
+        _handles,
+        _handles.context,
+        tokens.sublist(i, end),
+        sequenceId: sequenceId,
+      );
     }
   }
 
-  Future<void> _asyncBoundary() => Future<void>.delayed(Duration.zero);
 }
 
 String _drainDecodedChunks(List<String> decodedChunks) {

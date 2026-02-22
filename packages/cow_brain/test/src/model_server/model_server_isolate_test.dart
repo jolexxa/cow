@@ -499,14 +499,30 @@ class _FakeLlamaClient implements LlamaClientApi {
   @override
   Pointer<llama_context> createContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  ) => throw UnimplementedError();
+    LlamaContextOptions options, {
+    int maxSequences = 1,
+  }) => throw UnimplementedError();
 
   @override
   void decode(
     LlamaHandles handles,
     Pointer<llama_context> context,
-    List<int> tokens,
+    List<int> tokens, {
+    int sequenceId = 0,
+  }) => throw UnimplementedError();
+
+  @override
+  void decodeBatch(
+    LlamaHandles handles,
+    Pointer<llama_context> context,
+    List<({int token, int pos, int seqId, bool logits})> entries,
+  ) => throw UnimplementedError();
+
+  @override
+  int sampleAt(
+    LlamaHandles handles,
+    LlamaSamplerChain sampler,
+    int batchIndex,
   ) => throw UnimplementedError();
 
   @override

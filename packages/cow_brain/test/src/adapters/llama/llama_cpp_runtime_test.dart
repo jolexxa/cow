@@ -1211,6 +1211,183 @@ void main() {
       final text = output.map((chunk) => chunk.text).join();
       expect(text, isEmpty);
     });
+
+    test('createSequence initialises tracking for a new sequence', () {
+      final bindings = FakeLlamaBindings();
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      runtime.createSequence(1);
+
+      // Should not throw when generating on the new sequence.
+      expect(
+        () => runtime.createSequence(1),
+        throwsStateError,
+      );
+    });
+
+    test('destroySequence removes KV cache and tracking', () {
+      final bindings = FakeLlamaBindings()
+        ..posMin = 0
+        ..posMax = 5;
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      runtime.createSequence(1);
+      runtime.destroySequence(1);
+
+      expect(bindings.lastMemoryRmArgs, isNotNull);
+
+      // Destroyed sequence should not exist.
+      expect(
+        () => runtime.destroySequence(1),
+        throwsStateError,
+      );
+    });
+
+    test('destroySequence on non-existent sequence throws', () {
+      final bindings = FakeLlamaBindings();
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      expect(
+        () => runtime.destroySequence(99),
+        throwsStateError,
+      );
+    });
+
+    test('forkSequence copies KV cache and tracking', () {
+      final bindings = FakeLlamaBindings()
+        ..posMin = 0
+        ..posMax = 3;
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      runtime.forkSequence(source: 0, target: 1);
+
+      expect(bindings.memorySeqCpCalls, 1);
+      expect(bindings.lastMemorySeqCpArgs?.$2, 0); // source
+      expect(bindings.lastMemorySeqCpArgs?.$3, 1); // target
+    });
+
+    test('forkSequence throws when target already exists', () {
+      final bindings = FakeLlamaBindings();
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      runtime.createSequence(1);
+      expect(
+        () => runtime.forkSequence(source: 0, target: 1),
+        throwsStateError,
+      );
+    });
+
+    test('forkSequence throws when source does not exist', () {
+      final bindings = FakeLlamaBindings();
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      expect(
+        () => runtime.forkSequence(source: 99, target: 1),
+        throwsStateError,
+      );
+    });
   });
 }
 
@@ -1265,8 +1442,9 @@ final class FakeClient implements LlamaClientApi {
   @override
   Pointer<llama_context> createContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  ) {
+    LlamaContextOptions options, {
+    int maxSequences = 1,
+  }) {
     return createContextResult;
   }
 
@@ -1274,16 +1452,45 @@ final class FakeClient implements LlamaClientApi {
   void decode(
     LlamaHandles handles,
     Pointer<llama_context> context,
-    List<int> tokens,
-  ) {
+    List<int> tokens, {
+    int sequenceId = 0,
+  }) {
     decodeCalls += 1;
     decodedTokenLists.add(List<int>.of(tokens));
+    decodedSeqIds.add(sequenceId);
+  }
+
+  final List<int> decodedSeqIds = [];
+
+  @override
+  void decodeBatch(
+    LlamaHandles handles,
+    Pointer<llama_context> context,
+    List<({int token, int pos, int seqId, bool logits})> entries,
+  ) {
+    decodeCalls += 1;
+    decodedTokenLists.add(entries.map((e) => e.token).toList());
+    for (final e in entries) {
+      decodedSeqIds.add(e.seqId);
+    }
   }
 
   @override
   int sampleNext(
     LlamaHandles handles,
     LlamaSamplerChain sampler,
+  ) {
+    if (sampleQueue.isEmpty) {
+      return 0;
+    }
+    return sampleQueue.removeFirst();
+  }
+
+  @override
+  int sampleAt(
+    LlamaHandles handles,
+    LlamaSamplerChain sampler,
+    int batchIndex,
   ) {
     if (sampleQueue.isEmpty) {
       return 0;

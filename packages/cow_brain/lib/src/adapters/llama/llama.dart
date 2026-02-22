@@ -1,5 +1,6 @@
 // Barrel for llama.cpp-specific exports.
 
+export 'llama_batch_decoder.dart';
 export 'llama_bindings.dart';
 export 'llama_client.dart';
 export 'llama_cpp_runtime.dart';

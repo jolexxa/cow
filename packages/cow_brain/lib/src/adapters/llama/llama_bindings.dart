@@ -64,6 +64,9 @@ abstract class LlamaBindings {
     int nTokens,
   );
 
+  llama_batch llama_batch_init(int nTokens, int embd, int nSeqMax);
+  void llama_batch_free(llama_batch batch);
+
   int llama_decode(Pointer<llama_context> ctx, llama_batch batch);
 
   llama_sampler_chain_params llama_sampler_chain_default_params();
@@ -229,6 +232,14 @@ final class LlamaBindingsAdapter implements LlamaBindings {
   @override
   llama_batch llama_batch_get_one(Pointer<llama_token> tokens, int nTokens) =>
       _bindings.llama_batch_get_one(tokens, nTokens);
+
+  @override
+  llama_batch llama_batch_init(int nTokens, int embd, int nSeqMax) =>
+      _bindings.llama_batch_init(nTokens, embd, nSeqMax);
+
+  @override
+  void llama_batch_free(llama_batch batch) =>
+      _bindings.llama_batch_free(batch);
 
   @override
   int llama_decode(Pointer<llama_context> ctx, llama_batch batch) =>

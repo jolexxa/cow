@@ -196,6 +196,7 @@ sealed class BackendRuntimeOptions {
   String get modelPath;
   String get libraryPath;
   int get contextSize;
+  int get maxSequences;
   int get maxOutputTokensDefault;
   SamplingOptions get samplingOptions;
   Map<String, Object?> toJson();
@@ -210,6 +211,7 @@ final class LlamaCppRuntimeOptions extends BackendRuntimeOptions {
     this.modelOptions = const LlamaModelOptions(),
     this.samplingOptions = const SamplingOptions(),
     this.maxOutputTokensDefault = 512,
+    this.maxSequences = 1,
     this.backend = InferenceBackend.llamaCpp,
   });
   factory LlamaCppRuntimeOptions.fromJson(Map<String, Object?> json) =>
@@ -224,6 +226,8 @@ final class LlamaCppRuntimeOptions extends BackendRuntimeOptions {
   final SamplingOptions samplingOptions;
   @override
   final int maxOutputTokensDefault;
+  @override
+  final int maxSequences;
   @override
   final String libraryPath;
   @override
@@ -305,6 +309,7 @@ final class MlxRuntimeOptions extends BackendRuntimeOptions {
     required this.contextSize,
     this.samplingOptions = const SamplingOptions(),
     this.maxOutputTokensDefault = 512,
+    this.maxSequences = 1,
     this.backend = InferenceBackend.mlx,
   });
   factory MlxRuntimeOptions.fromJson(Map<String, Object?> json) =>
@@ -332,6 +337,9 @@ final class MlxRuntimeOptions extends BackendRuntimeOptions {
   /// Maximum output tokens per generation.
   @override
   final int maxOutputTokensDefault;
+
+  @override
+  final int maxSequences;
 
   @override
   Map<String, Object?> toJson() => _$MlxRuntimeOptionsToJson(this);
