@@ -197,6 +197,62 @@ void main() {
       },
     );
 
+    test('generate after reset uses the new context handle', () async {
+      final bindings = FakeMlxBindings();
+      var nextCtx = 100;
+      final client = _FakeMlxClient()
+        ..createContextResult = nextCtx
+        ..generateNextQueue.add(null);
+
+      final runtime = _makeRuntime(client, bindings);
+
+      // First generate — normal.
+      await runtime
+          .generate(
+            prompt: 'first',
+            stopSequences: const [],
+            addBos: true,
+            requiresReset: false,
+            reusePrefixMessageCount: 0,
+          )
+          .toList();
+
+      // Reset creates a new context handle.
+      nextCtx = 200;
+      client
+        ..createContextResult = nextCtx
+        ..generateNextQueue.add(null);
+
+      await runtime
+          .generate(
+            prompt: 'second',
+            stopSequences: const [],
+            addBos: true,
+            requiresReset: true,
+            reusePrefixMessageCount: 0,
+          )
+          .toList();
+
+      // Third generate WITHOUT reset — must use the handle from reset,
+      // not the stale original.
+      client.generateNextQueue.add(null);
+
+      await runtime
+          .generate(
+            prompt: 'third',
+            stopSequences: const [],
+            addBos: true,
+            requiresReset: false,
+            reusePrefixMessageCount: 0,
+          )
+          .toList();
+
+      // generateBegin should have received the new context handle (200),
+      // not the original. We verify via the handle stored on the handles
+      // object at the time of the last generateBegin call.
+      expect(client.lastGenerateBeginContextHandle, nextCtx);
+    });
+
     test('generate flushes remaining text when stream ends', () async {
       final bindings = FakeMlxBindings();
       // Use a stop sequence long enough that text won't flush until end.
@@ -680,6 +736,8 @@ final class _FakeMlxClient implements MlxClientApi {
   @override
   void resetContext(MlxHandles handles, int maxTokens) {
     resetContextCalls++;
+    // Match real MlxClient.resetContext: assign a new context handle.
+    handles.contextHandle = createContext(handles, maxTokens);
   }
 
   @override
@@ -692,7 +750,10 @@ final class _FakeMlxClient implements MlxClientApi {
     SamplingOptions options,
   ) {
     generateBeginCalls++;
+    lastGenerateBeginContextHandle = handles.contextHandle;
   }
+
+  int? lastGenerateBeginContextHandle;
 
   @override
   List<int>? generateNext(MlxHandles handles, {int bufferSize = 256}) {

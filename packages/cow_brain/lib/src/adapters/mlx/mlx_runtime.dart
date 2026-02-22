@@ -78,6 +78,7 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
 
     if (requiresReset) {
       _client.resetContext(_handles, _options.contextSize);
+      _contextHandles[sequenceId] = _handles.contextHandle;
     }
 
     // Tokenize the full prompt every time. The native side compares
