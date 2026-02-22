@@ -9,13 +9,13 @@ Thin Dart FFI bindings for [CowMLX](../cow_mlx/README.md), the MLX Swift inferen
 
 This package requires the `libCowMLX.dylib` native library built from [cow_mlx](../cow_mlx/README.md).
 
-1) Build the native library:
+Build the native library:
 
 ```sh
-tool/build_mlx.sh
+dart tool/build_mlx.dart
 ```
 
-2) Generate bindings:
+Generate bindings:
 
 ```sh
 dart run ffigen --config tool/ffigen.yaml
