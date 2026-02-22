@@ -71,7 +71,7 @@ jobs:
       matrix:
         include:
           - platform: macos_arm64
-            runner: macos-14
+            runner: macos-latest
             asset_os: macos
             asset_arch: arm64
             archive: zip
@@ -97,9 +97,7 @@ jobs:
           sdk: stable
 
       - name: Install dependencies
-        run: |
-          dart pub global activate very_good_cli
-          very_good packages get -r
+        run: dart tool/pub_get.dart
 
       - name: Download llama.cpp assets
         run: dart ./tool/download_llama_assets.dart

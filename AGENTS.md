@@ -29,6 +29,7 @@ See README.md for full development setup and contributing guidelines.
 All scripts are in `./tool/` and accept an optional package name (e.g., `cow_brain`, `blocterm`).
 
 ```bash
+dart tool/pub_get.dart [pkg]      # dart pub get (one or all)
 dart tool/test.dart [pkg]         # run Dart tests (one or all)
 dart tool/analyze.dart [pkg]      # dart analyze --fatal-infos
 dart tool/format.dart [pkg]       # dart format (add --check for CI mode)

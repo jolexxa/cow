@@ -92,11 +92,10 @@ cd cow
 
 #### 2. Install dependencies
 
-Cow is a monorepo with multiple Dart packages under `packages/`. We use [very_good_cli] to get dependencies for all of them at once.
+Cow is a monorepo with multiple Dart packages under `packages/`.
 
 ```sh
-dart pub global activate very_good_cli
-very_good packages get -r
+dart tool/pub_get.dart
 ```
 
 #### 3. Download llama.cpp native libraries
@@ -126,6 +125,7 @@ dart run packages/cow/bin/cow.dart
 All scripts are in `./tool/` and most accept an optional package name (e.g., `cow_brain`, `blocterm`).
 
 ```sh
+dart tool/pub_get.dart [pkg]      # dart pub get (one or all)
 dart tool/test.dart [pkg]         # run Dart tests (one or all)
 dart tool/analyze.dart [pkg]      # dart analyze --fatal-infos
 dart tool/format.dart [pkg]       # dart format (add --check for CI mode)
@@ -174,5 +174,4 @@ Cow itself is licensed under the permissive MIT license. Yee-haw!
 [Alibaba Cloud]: https://www.alibabacloud.com/
 [jinja]: https://jinja.palletsprojects.com/
 [llama.cpp]: https://github.com/ggml-org/llama.cpp
-[very_good_cli]: https://pub.dev/packages/very_good_cli
 [Xcode]: https://developer.apple.com/xcode/
