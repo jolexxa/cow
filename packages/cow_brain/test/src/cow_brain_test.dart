@@ -81,20 +81,17 @@ void main() {
     });
 
     test('can be instantiated', () {
-      expect(CowBrain(libraryPath: '/tmp/libllama.so'), isNotNull);
+      expect(CowBrain(), isNotNull);
     });
 
     test('forwards calls to the harness', () async {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
-      final brain = CowBrain(
-        libraryPath: '/tmp/libllama.so',
-        harness: harness,
-      );
+      final brain = CowBrain(harness: harness);
 
       await brain.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -192,17 +189,17 @@ void main() {
       expect(brains.values.length, 3);
 
       await brainA.init(
-        modelPointer: model.modelPointer,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: model.modelPointer,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
       );
       await brainB.init(
-        modelPointer: model.modelPointer,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: model.modelPointer,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -217,8 +214,8 @@ void main() {
   });
 }
 
-LlamaRuntimeOptions _runtimeOptions() {
-  return const LlamaRuntimeOptions(
+LlamaCppRuntimeOptions _runtimeOptions() {
+  return const LlamaCppRuntimeOptions(
     modelPath: '/tmp/model.gguf',
     libraryPath: '/tmp/libllama.so',
     contextOptions: LlamaContextOptions(

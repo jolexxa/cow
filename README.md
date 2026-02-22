@@ -11,8 +11,6 @@ Cow is just an humble AI for your computer. 🥺
 
 Cow allows you to interact with a local language model, free of charge, as much as you could possibly want — all from the comfort of your own home terminal.
 
-Cow can reason[^1][^2] and use tools[^3][^4].
-
 > [!NOTE]
 > Cow supports 🍎 [Apple] Silicon and 🐧 Linux x64.
 
@@ -26,53 +24,42 @@ curl -fsSL https://raw.githubusercontent.com/jolexxa/cow/main/install.sh | bash
 
 This downloads the latest release for your platform and installs it to `~/.local/bin/`.
 
-### Development Setup
-
-To build from source, you will need to have [Dart SDK] installed.
-
 > [!TIP]
-> Ironically, the easiest way to get started with Dart is to use [FVM] to install Flutter. Without a version manager, you'll end up in a stampede.
-
-```sh
-
-# Cow uses a submodule for llama_cpp, so this clones everything you need.
-# These headers are used for the llama_cpp_dart FFI bindings package
-# included with Cow.
-git clone --recursive https://github.com/jolexxa/cow.git
-
-# Download the required native libraries for llama_cpp based on the
-# host operating system (macOS ARM64 or Linux x64):
-dart ./tool/download_llama_assets.dart
-
-# Get packages recursively for all sub-projects:
-dart pub global activate very_good_cli
-very_good packages get -r
-
-# To build only:
-# dart build cli
-
-dart run bin/cow.dart
-```
-
-The first time you run Cow, it will download the required model files automatically from [Hugging Face].
-
-> [!WARNING]
-> Cow is early in development. Much of Cow's client code is expected to change substantially. **Don't do anything important with Cow yet.**
+> The first time you run Cow, it will download the required model files automatically from [Hugging Face].
 
 ## 🧠 Cow Intelligence
 
-Cow introduces a package which uses FFI bindings for [llama_cpp] called [llama_cpp_dart](./packages/llama_cpp_dart/README.md), enabling Cow to run local large language models.
+Cow supports two inference backends:
 
-A higher-level packaged called [cow_brain](./packages/cow_brain/README.md) wraps `llama_cpp` and enables high-level agentic functionality.
+- **[llama.cpp]** via [llama_cpp_dart](./packages/llama_cpp_dart/README.md) — runs GGUF models on CPU or GPU. Llama.cpp is cross platform and works just about anywhere.
+- **[MLX]** via [cow_mlx](./packages/cow_mlx/README.md) + [mlx_dart](./packages/mlx_dart/README.md) — runs MLX-format models natively on Apple Silicon. MLX tends to outperform llama.cpp by almost an order of magnitude or more on Apple Silicon hardware.
 
-Cow currently supports models in the `.gguf` format and uses `Qwen 2.5-7B Instruct` for lightweight summarization tasks and `Qwen 3-8B` for primary interactions, including reasoning and tool execution.
+A higher-level package called [cow_brain](./packages/cow_brain/README.md) wraps both backends behind a common `InferenceRuntime` interface and enables high-level agentic functionality (reasoning, tool use, context management).
+
+On Apple Silicon, Cow uses MLX with `Qwen 3-8B 4-bit` for primary interactions and `Qwen 2.5-3B Instruct 4-bit` for lightweight summarization. On Linux, Cow uses llama.cpp with the equivalent GGUF models.
 
 Cow cannot support arbitrary models. Most models require prompts to follow a specific template, usually provided as [jinja] code.
 
 > [!TIP]
-> Since Cow tries to avoid re-tokenizing the message history on each interaction, one would need to implement the template for any new models in native Dart code. This may involve writing a [prompt formatter](packages/cow_brain/lib/src/adapters/llama/qwen3_prompt_formatter.dart), [stream parser](packages/cow_brain/lib/src/adapters/llama/qwen_stream_parser.dart), and/or [tool parser](packages/cow_brain/lib/src/adapters/llama/qwen3_tool_call_parser.dart) before hooking it up in the [llama profiles](packages/cow_brain/lib/src/adapters/llama/llama_profiles.dart), [app model profiles](lib/src/app/app_model_profiles.dart), and [main app](lib/src/app/app.dart).
+> Since Cow tries to avoid re-tokenizing the message history on each interaction, one would need to implement the template for any new models in native Dart code. This may involve writing a [prompt formatter](packages/cow_brain/lib/src/adapters/qwen3_prompt_formatter.dart), [stream parser](packages/cow_brain/lib/src/adapters/universal_stream_parser.dart), and/or [tool call extractor](packages/cow_brain/lib/src/adapters/extractors/json_tool_call_extractor.dart) before hooking it up in the [model profiles](packages/cow_brain/lib/src/adapters/model_profiles.dart), [app model profiles](packages/cow/lib/src/app/app_model_profiles.dart), and [main app](packages/cow/lib/src/app/app.dart).
 
-One could change the context size in [AppInfo](./lib/src/app/app_info.dart). One should be sure they have enough memory to support the context size they choose or they might just put their computer out to pasture.
+One could change the context size in [AppInfo](./packages/cow/lib/src/app/app_info.dart). One should be sure they have enough memory to support the context size they choose or they might just put their computer out to pasture.
+
+## 📦 Packages
+
+Cow is currently a monorepo. All packages live under `packages/`.
+
+| Package                                            | Description                                                                                                  |
+|----------------------------------------------------|--------------------------------------------------------------------------------------------------------------|
+| [cow](./packages/cow/)                             | Main terminal application — orchestrates backends, UI, and model management                                  |
+| [cow_brain](./packages/cow_brain/)                 | Agentic inference layer — reasoning, tool use, context management, and a common `InferenceRuntime` interface |
+| [cow_model_manager](./packages/cow_model_manager/) | Model installer — downloads and manages LLM model files                                                      |
+| [llama_cpp_dart](./packages/llama_cpp_dart/)       | Dart FFI bindings for [llama.cpp]                                                                            |
+| [cow_mlx](./packages/cow_mlx/)                     | MLX Swift inference backend (macOS only) — built separately via [Xcode](#4-build-mlx-macos-only)             |
+| [mlx_dart](./packages/mlx_dart/)                   | Dart FFI bindings for [cow_mlx](./packages/cow_mlx/)                                                         |
+| [blocterm](./packages/blocterm/)                   | Bridges [bloc] and [nocterm] for reactive terminal UIs                                                       |
+| [logic_blocks](./packages/logic_blocks/)           | Human-friendly hierarchical state machines for Dart                                                          |
+| [collections](./packages/collections/)             | Utility collection types used across packages                                                                |
 
 ## 💻 Terminal
 
@@ -83,28 +70,101 @@ Cow-related contributions to Nocterm:
 - [fix: quantize colors in environments without true color support](https://github.com/Norbert515/nocterm/pull/36)
 - [feat: text selection](https://github.com/Norbert515/nocterm/pull/40)
 - [fix: scrollbar position](https://github.com/Norbert515/nocterm/pull/41)
+- [fix: render object attach](https://github.com/Norbert515/nocterm/pull/46)
+
+## 🤝 Contributing
+
+### Development Setup
+
+#### Prerequisites
+
+- [Dart SDK] (the easiest way is to use [FVM] to install Flutter, which includes Dart — without a version manager, you'll end up in a stampede)
+- [Xcode] (macOS only — required to build the MLX Swift library and compile Metal shaders)
+
+#### 1. Clone with submodules
+
+Cow includes [llama.cpp] as a git submodule (used for FFI bindings). The `--recursive` flag pulls it in automatically.
+
+```sh
+git clone --recursive https://github.com/jolexxa/cow.git
+cd cow
+```
+
+#### 2. Install dependencies
+
+Cow is a monorepo with multiple Dart packages under `packages/`. We use [very_good_cli] to get dependencies for all of them at once.
+
+```sh
+dart pub global activate very_good_cli
+very_good packages get -r
+```
+
+#### 3. Download llama.cpp native libraries
+
+Downloads prebuilt llama.cpp binaries for your platform (macOS ARM64 or Linux x64) and places them in `packages/llama_cpp_dart/assets/native/`.
+
+```sh
+dart tool/download_llama_assets.dart
+```
+
+#### 4. Build MLX (macOS only)
+
+Builds the `CowMLX` Swift dynamic library. This requires Xcode (not just the command-line tools) because MLX uses Metal shaders that SwiftPM alone can't compile.
+
+```sh
+dart tool/build_mlx.dart
+```
+
+#### 5. Run
+
+```sh
+dart run packages/cow/bin/cow.dart
+```
+
+### Developer Scripts
+
+All scripts are in `./tool/` and most accept an optional package name (e.g., `cow_brain`, `blocterm`).
+
+```sh
+dart tool/test.dart [pkg]         # run Dart tests (one or all)
+dart tool/analyze.dart [pkg]      # dart analyze --fatal-infos
+dart tool/format.dart [pkg]       # dart format (add --check for CI mode)
+dart tool/coverage.dart [pkg]     # tests + lcov coverage report
+dart tool/codegen.dart [pkg]      # build_runner / ffigen code generation
+dart tool/build_mlx.dart          # build CowMLX Swift library
+dart tool/checks.dart             # full CI check (format → analyze → build → test → coverage)
+```
+
+### Model Profiles
+
+Cow treats "model profiles" as the wiring layer between raw inference output and the app's message/tool semantics. Each profile defines three pieces:
+
+- **Prompt formatter** — converts messages into a token sequence matching the model's chat template
+- **Stream parser** — converts raw streamed tokens into structured `ModelOutput`
+- **Tool parser** — extracts tool calls from model text output
+
+Profiles live in:
+
+- [cow_brain model profiles](packages/cow_brain/lib/src/adapters/model_profiles.dart) — runtime behavior
+- [app model profiles](packages/cow/lib/src/app/app_model_profiles.dart) — which models the app ships
+- [cow_model_manager](packages/cow_model_manager/lib/src/) — model file specs, registry, and installer logic
+
+To add a new local model, implement the formatter/parser/extractor as needed, register the profile, and add tests. Profiles are thin wiring by design — keep logic in the formatter/parser classes and keep the profile declarations mostly declarative.
 
 ## 🎬 Credits
 
 Cow is grateful to [Alibaba Cloud] for releasing the Qwen models under the permissive Apache 2.0 license. See the [credits](./CREDITS.md) for the full license.
 
-Cow is grateful for its existence in large part to both OpenAI and Anthropic, whose models could almost be considered Cow's parents.
-
 Cow itself is licensed under the permissive MIT license. Yee-haw!
 
 ---
-
-[^1]: <https://pmc.ncbi.nlm.nih.gov/articles/PMC2636880/pdf/pone.0004441.pdf>
-[^2]: <https://www.animalbehaviorandcognition.org/uploads/journals/17/AB%26C_2017_Vol4%284%29_Marino_Allen.pdf>
-[^3]: <https://interestingengineering.com/science/veronika-swiss-cow-cattle-intelligence-study>
-[^4]: <https://www.bbc.com/news/articles/cj0n127y74go>
 
 [license_badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [license_link]: https://opensource.org/licenses/MIT
 [very_good_analysis_badge]: https://img.shields.io/badge/style-very_good_analysis-B22C89.svg
 [very_good_analysis_link]: https://pub.dev/packages/very_good_analysis
 [nocterm]: https://pub.dev/packages/nocterm
-[llama_cpp]: https://github.com/ggml-org/llama.cpp
+[MLX]: https://github.com/ml-explore/mlx
 [cowsay]: https://en.wikipedia.org/wiki/Cowsay
 [bloc]: https://pub.dev/packages/bloc
 [Hugging Face]: https://huggingface.co/
@@ -113,3 +173,6 @@ Cow itself is licensed under the permissive MIT license. Yee-haw!
 [Apple]: https://farmhouseguide.com/what-fruits-can-cows-eat/#Apples
 [Alibaba Cloud]: https://www.alibabacloud.com/
 [jinja]: https://jinja.palletsprojects.com/
+[llama.cpp]: https://github.com/ggml-org/llama.cpp
+[very_good_cli]: https://pub.dev/packages/very_good_cli
+[Xcode]: https://developer.apple.com/xcode/

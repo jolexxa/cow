@@ -88,36 +88,46 @@ Map<String, dynamic> _$LlmConfigToJson(LlmConfig instance) => <String, dynamic>{
   'reusePrefixMessageCount': instance.reusePrefixMessageCount,
 };
 
-LlamaRuntimeOptions _$LlamaRuntimeOptionsFromJson(Map<String, dynamic> json) =>
-    LlamaRuntimeOptions(
-      modelPath: json['modelPath'] as String,
-      contextOptions: LlamaContextOptions.fromJson(
-        json['contextOptions'] as Map<String, dynamic>,
-      ),
-      libraryPath: json['libraryPath'] as String,
-      modelOptions: json['modelOptions'] == null
-          ? const LlamaModelOptions()
-          : LlamaModelOptions.fromJson(
-              json['modelOptions'] as Map<String, dynamic>,
-            ),
-      samplingOptions: json['samplingOptions'] == null
-          ? const LlamaSamplingOptions()
-          : LlamaSamplingOptions.fromJson(
-              json['samplingOptions'] as Map<String, dynamic>,
-            ),
-      maxOutputTokensDefault:
-          (json['maxOutputTokensDefault'] as num?)?.toInt() ?? 512,
-    );
+LlamaCppRuntimeOptions _$LlamaCppRuntimeOptionsFromJson(
+  Map<String, dynamic> json,
+) => LlamaCppRuntimeOptions(
+  modelPath: json['modelPath'] as String,
+  contextOptions: LlamaContextOptions.fromJson(
+    json['contextOptions'] as Map<String, dynamic>,
+  ),
+  libraryPath: json['libraryPath'] as String,
+  modelOptions: json['modelOptions'] == null
+      ? const LlamaModelOptions()
+      : LlamaModelOptions.fromJson(
+          json['modelOptions'] as Map<String, dynamic>,
+        ),
+  samplingOptions: json['samplingOptions'] == null
+      ? const SamplingOptions()
+      : SamplingOptions.fromJson(
+          json['samplingOptions'] as Map<String, dynamic>,
+        ),
+  maxOutputTokensDefault:
+      (json['maxOutputTokensDefault'] as num?)?.toInt() ?? 512,
+  backend:
+      $enumDecodeNullable(_$InferenceBackendEnumMap, json['backend']) ??
+      InferenceBackend.llamaCpp,
+);
 
-Map<String, dynamic> _$LlamaRuntimeOptionsToJson(
-  LlamaRuntimeOptions instance,
+Map<String, dynamic> _$LlamaCppRuntimeOptionsToJson(
+  LlamaCppRuntimeOptions instance,
 ) => <String, dynamic>{
+  'backend': _$InferenceBackendEnumMap[instance.backend]!,
   'modelPath': instance.modelPath,
   'modelOptions': instance.modelOptions.toJson(),
   'contextOptions': instance.contextOptions.toJson(),
   'samplingOptions': instance.samplingOptions.toJson(),
   'maxOutputTokensDefault': instance.maxOutputTokensDefault,
   'libraryPath': instance.libraryPath,
+};
+
+const _$InferenceBackendEnumMap = {
+  InferenceBackend.llamaCpp: 'llama_cpp',
+  InferenceBackend.mlx: 'mlx',
 };
 
 LlamaModelOptions _$LlamaModelOptionsFromJson(Map<String, dynamic> json) =>
@@ -159,31 +169,56 @@ Map<String, dynamic> _$LlamaContextOptionsToJson(
   'useFlashAttn': instance.useFlashAttn,
 };
 
-LlamaSamplingOptions _$LlamaSamplingOptionsFromJson(
-  Map<String, dynamic> json,
-) => LlamaSamplingOptions(
-  seed: (json['seed'] as num?)?.toInt() ?? 0,
-  topK: (json['topK'] as num?)?.toInt(),
-  topP: (json['topP'] as num?)?.toDouble(),
-  minP: (json['minP'] as num?)?.toDouble(),
-  temperature: (json['temperature'] as num?)?.toDouble(),
-  typicalP: (json['typicalP'] as num?)?.toDouble(),
-  penaltyRepeat: (json['penaltyRepeat'] as num?)?.toDouble(),
-  penaltyLastN: (json['penaltyLastN'] as num?)?.toInt(),
-);
+SamplingOptions _$SamplingOptionsFromJson(Map<String, dynamic> json) =>
+    SamplingOptions(
+      seed: (json['seed'] as num?)?.toInt() ?? 0,
+      topK: (json['topK'] as num?)?.toInt(),
+      topP: (json['topP'] as num?)?.toDouble(),
+      minP: (json['minP'] as num?)?.toDouble(),
+      temperature: (json['temperature'] as num?)?.toDouble(),
+      typicalP: (json['typicalP'] as num?)?.toDouble(),
+      penaltyRepeat: (json['penaltyRepeat'] as num?)?.toDouble(),
+      penaltyLastN: (json['penaltyLastN'] as num?)?.toInt(),
+    );
 
-Map<String, dynamic> _$LlamaSamplingOptionsToJson(
-  LlamaSamplingOptions instance,
-) => <String, dynamic>{
-  'seed': instance.seed,
-  'topK': instance.topK,
-  'topP': instance.topP,
-  'minP': instance.minP,
-  'temperature': instance.temperature,
-  'typicalP': instance.typicalP,
-  'penaltyRepeat': instance.penaltyRepeat,
-  'penaltyLastN': instance.penaltyLastN,
-};
+Map<String, dynamic> _$SamplingOptionsToJson(SamplingOptions instance) =>
+    <String, dynamic>{
+      'seed': instance.seed,
+      'topK': instance.topK,
+      'topP': instance.topP,
+      'minP': instance.minP,
+      'temperature': instance.temperature,
+      'typicalP': instance.typicalP,
+      'penaltyRepeat': instance.penaltyRepeat,
+      'penaltyLastN': instance.penaltyLastN,
+    };
+
+MlxRuntimeOptions _$MlxRuntimeOptionsFromJson(Map<String, dynamic> json) =>
+    MlxRuntimeOptions(
+      modelPath: json['modelPath'] as String,
+      libraryPath: json['libraryPath'] as String,
+      contextSize: (json['contextSize'] as num).toInt(),
+      samplingOptions: json['samplingOptions'] == null
+          ? const SamplingOptions()
+          : SamplingOptions.fromJson(
+              json['samplingOptions'] as Map<String, dynamic>,
+            ),
+      maxOutputTokensDefault:
+          (json['maxOutputTokensDefault'] as num?)?.toInt() ?? 512,
+      backend:
+          $enumDecodeNullable(_$InferenceBackendEnumMap, json['backend']) ??
+          InferenceBackend.mlx,
+    );
+
+Map<String, dynamic> _$MlxRuntimeOptionsToJson(MlxRuntimeOptions instance) =>
+    <String, dynamic>{
+      'backend': _$InferenceBackendEnumMap[instance.backend]!,
+      'modelPath': instance.modelPath,
+      'libraryPath': instance.libraryPath,
+      'contextSize': instance.contextSize,
+      'samplingOptions': instance.samplingOptions.toJson(),
+      'maxOutputTokensDefault': instance.maxOutputTokensDefault,
+    };
 
 AgentSettings _$AgentSettingsFromJson(Map<String, dynamic> json) =>
     AgentSettings(
@@ -198,14 +233,14 @@ Map<String, dynamic> _$AgentSettingsToJson(AgentSettings instance) =>
     };
 
 InitRequest _$InitRequestFromJson(Map<String, dynamic> json) => InitRequest(
-  modelPointer: (json['modelPointer'] as num).toInt(),
-  runtimeOptions: LlamaRuntimeOptions.fromJson(
-    json['runtimeOptions'] as Map<String, dynamic>,
+  modelHandle: (json['modelPointer'] as num).toInt(),
+  options: BackendRuntimeOptions.fromJson(
+    json['options'] as Map<String, dynamic>,
   ),
   profile: $enumDecode(
-    _$LlamaProfileIdEnumMap,
+    _$ModelProfileIdEnumMap,
     json['profile'],
-    unknownValue: LlamaProfileId.qwen3,
+    unknownValue: ModelProfileId.qwen3,
   ),
   tools: (json['tools'] as List<dynamic>)
       .map((e) => ToolDefinition.fromJson(e as Map<String, dynamic>))
@@ -216,18 +251,18 @@ InitRequest _$InitRequestFromJson(Map<String, dynamic> json) => InitRequest(
 
 Map<String, dynamic> _$InitRequestToJson(InitRequest instance) =>
     <String, dynamic>{
-      'modelPointer': instance.modelPointer,
-      'runtimeOptions': instance.runtimeOptions.toJson(),
-      'profile': _$LlamaProfileIdEnumMap[instance.profile]!,
+      'modelPointer': instance.modelHandle,
+      'options': instance.options.toJson(),
+      'profile': _$ModelProfileIdEnumMap[instance.profile]!,
       'tools': instance.tools.map((e) => e.toJson()).toList(),
       'settings': instance.settings.toJson(),
       'enableReasoning': instance.enableReasoning,
     };
 
-const _$LlamaProfileIdEnumMap = {
-  LlamaProfileId.qwen3: 'qwen3',
-  LlamaProfileId.qwen25: 'qwen25',
-  LlamaProfileId.auto: 'auto',
+const _$ModelProfileIdEnumMap = {
+  ModelProfileId.qwen3: 'qwen3',
+  ModelProfileId.qwen25: 'qwen25',
+  ModelProfileId.auto: 'auto',
 };
 
 RunTurnRequest _$RunTurnRequestFromJson(

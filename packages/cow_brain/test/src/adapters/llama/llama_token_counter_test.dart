@@ -1,9 +1,10 @@
-import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/local_token_counter.dart';
+import 'package:cow_brain/src/adapters/qwen3_prompt_formatter.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('LlamaTokenCounter', () {
+  group('LocalTokenCounter', () {
     const formatter = Qwen3PromptFormatter();
     const tool = ToolDefinition(
       name: 'search',
@@ -21,7 +22,7 @@ void main() {
     ];
 
     test('counts tokens on the fully formatted prompt', () {
-      final counter = LlamaTokenCounter(
+      final counter = LocalTokenCounter(
         formatter: formatter,
         tokenCounter: countTokens,
       );

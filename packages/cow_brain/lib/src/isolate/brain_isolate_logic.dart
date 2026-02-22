@@ -16,11 +16,7 @@ sealed class BrainIsolateState extends StateLogic<BrainIsolateState> {
 
   BrainIsolateConfig createConfig(InitRequest request) {
     final factory = get<AgentBundleFactory>();
-
-    final contextSize = request.runtimeOptions.contextOptions.contextSize;
-    final maxOutputTokens = request.runtimeOptions.maxOutputTokensDefault;
-    final temperature =
-        request.runtimeOptions.samplingOptions.temperature ?? 0.7;
+    final options = request.options;
 
     final tools = ToolRegistry();
     for (final tool in request.tools) {
@@ -31,14 +27,14 @@ sealed class BrainIsolateState extends StateLogic<BrainIsolateState> {
     }
 
     final bundle = factory(
-      modelPointer: request.modelPointer,
-      runtimeOptions: request.runtimeOptions,
+      modelPointer: request.modelHandle,
+      options: options,
       profile: request.profile,
       tools: tools,
       conversation: Conversation.initial(),
-      contextSize: contextSize,
-      maxOutputTokens: maxOutputTokens,
-      temperature: temperature,
+      contextSize: options.contextSize,
+      maxOutputTokens: options.maxOutputTokensDefault,
+      temperature: options.samplingOptions.temperature ?? 0.7,
       safetyMarginTokens: request.settings.safetyMarginTokens,
     );
 
@@ -47,7 +43,7 @@ sealed class BrainIsolateState extends StateLogic<BrainIsolateState> {
       agent: bundle.agent,
       conversation: bundle.conversation,
       defaultSettings: request.settings,
-      runtimeOptions: request.runtimeOptions,
+      options: options,
       enableReasoningDefault: request.enableReasoning,
     );
   }

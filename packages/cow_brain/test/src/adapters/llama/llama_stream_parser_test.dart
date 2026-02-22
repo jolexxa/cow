@@ -1,5 +1,8 @@
 import 'package:cow_brain/cow_brain.dart';
-import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/extractors/json_tool_call_extractor.dart';
+import 'package:cow_brain/src/adapters/stream_chunk.dart';
+import 'package:cow_brain/src/adapters/stream_tokenizer.dart';
+import 'package:cow_brain/src/adapters/universal_stream_parser.dart';
 import 'package:cow_brain/src/core/model_output.dart';
 import 'package:test/test.dart';
 
@@ -20,12 +23,12 @@ void main() {
 
     test('parses reasoning, text, tool calls, and finish', () async {
       const toolJson = '{"id":"1","name":"search","arguments":{"query":"q"}}';
-      final chunks = Stream<LlamaStreamChunk>.fromIterable(const [
-        LlamaStreamChunk(
+      final chunks = Stream<StreamChunk>.fromIterable(const [
+        StreamChunk(
           text: '<think>Quiet plan.</think>',
           tokenCountDelta: 0,
         ),
-        LlamaStreamChunk(
+        StreamChunk(
           text: 'Working...<tool_call>$toolJson</tool_call>',
           tokenCountDelta: 0,
         ),
@@ -45,10 +48,10 @@ void main() {
     });
 
     test('handles tag boundaries across chunks', () async {
-      final chunks = Stream<LlamaStreamChunk>.fromIterable(const [
-        LlamaStreamChunk(text: '<think>Plan', tokenCountDelta: 0),
-        LlamaStreamChunk(text: '.</think>Hi ', tokenCountDelta: 0),
-        LlamaStreamChunk(
+      final chunks = Stream<StreamChunk>.fromIterable(const [
+        StreamChunk(text: '<think>Plan', tokenCountDelta: 0),
+        StreamChunk(text: '.</think>Hi ', tokenCountDelta: 0),
+        StreamChunk(
           text:
               '<tool_call>{"name":"lookup","arguments":{"id":42}}</tool_call>',
           tokenCountDelta: 0,
@@ -68,9 +71,9 @@ void main() {
     });
 
     test('handles plain text without special tags', () async {
-      final chunks = Stream<LlamaStreamChunk>.fromIterable(const [
-        LlamaStreamChunk(text: 'Hello ', tokenCountDelta: 0),
-        LlamaStreamChunk(text: 'world!', tokenCountDelta: 0),
+      final chunks = Stream<StreamChunk>.fromIterable(const [
+        StreamChunk(text: 'Hello ', tokenCountDelta: 0),
+        StreamChunk(text: 'world!', tokenCountDelta: 0),
       ]);
 
       final outputs = await parser.parse(chunks).toList();
@@ -82,8 +85,8 @@ void main() {
     });
 
     test('handles multiple reasoning blocks', () async {
-      final chunks = Stream<LlamaStreamChunk>.fromIterable(const [
-        LlamaStreamChunk(
+      final chunks = Stream<StreamChunk>.fromIterable(const [
+        StreamChunk(
           text:
               '<think>First thought.</think>Middle text<think>Second thought.</think>',
           tokenCountDelta: 0,
@@ -104,16 +107,16 @@ void main() {
     });
 
     test('stops after tool calls', () async {
-      final chunks = Stream<LlamaStreamChunk>.fromIterable(const [
-        LlamaStreamChunk(
+      final chunks = Stream<StreamChunk>.fromIterable(const [
+        StreamChunk(
           text: '<tool_call>{"name":"a","arguments":{}}</tool_call>',
           tokenCountDelta: 0,
         ),
-        LlamaStreamChunk(
+        StreamChunk(
           text: 'This text should be ignored',
           tokenCountDelta: 0,
         ),
-        LlamaStreamChunk(
+        StreamChunk(
           text: '<tool_call>{"name":"b","arguments":{}}</tool_call>',
           tokenCountDelta: 0,
         ),
@@ -133,7 +136,7 @@ void main() {
     });
 
     test('handles empty stream', () async {
-      const chunks = Stream<LlamaStreamChunk>.empty();
+      const chunks = Stream<StreamChunk>.empty();
 
       final outputs = await parser.parse(chunks).toList();
 
@@ -142,8 +145,8 @@ void main() {
     });
 
     test('handles reasoning with no content', () async {
-      final chunks = Stream<LlamaStreamChunk>.fromIterable(const [
-        LlamaStreamChunk(text: '<think></think>Done.', tokenCountDelta: 0),
+      final chunks = Stream<StreamChunk>.fromIterable(const [
+        StreamChunk(text: '<think></think>Done.', tokenCountDelta: 0),
       ]);
 
       final outputs = await parser.parse(chunks).toList();
@@ -154,9 +157,9 @@ void main() {
     });
 
     test('emits token updates when token count delta is provided', () async {
-      final chunks = Stream<LlamaStreamChunk>.fromIterable(const [
-        LlamaStreamChunk(text: 'Hello', tokenCountDelta: 3),
-        LlamaStreamChunk(text: ' world', tokenCountDelta: 2),
+      final chunks = Stream<StreamChunk>.fromIterable(const [
+        StreamChunk(text: 'Hello', tokenCountDelta: 3),
+        StreamChunk(text: ' world', tokenCountDelta: 2),
       ]);
 
       final outputs = await parser.parse(chunks).toList();

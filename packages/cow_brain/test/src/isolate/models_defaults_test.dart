@@ -51,7 +51,7 @@ void main() {
         nThreads: 8,
         nThreadsBatch: 4,
       );
-      final runtime = LlamaRuntimeOptions(
+      final runtime = LlamaCppRuntimeOptions(
         modelPath: StringBuffer('/models/qwen.gguf').toString(),
         libraryPath: '/tmp/libllama.so',
         contextOptions: contextOptions,
@@ -67,7 +67,7 @@ void main() {
 
     test('model, context, and sampling option accessors', () {
       const modelOptions = LlamaModelOptions();
-      const samplingOptions = LlamaSamplingOptions();
+      const samplingOptions = SamplingOptions();
       const contextOptions = LlamaContextOptions(
         contextSize: 128,
         nBatch: 16,

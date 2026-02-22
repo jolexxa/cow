@@ -6,6 +6,9 @@ import 'dart:isolate';
 import 'package:cow_brain/src/adapters/llama/llama_bindings.dart';
 import 'package:cow_brain/src/adapters/llama/llama_client.dart';
 import 'package:cow_brain/src/adapters/llama/llama_handles.dart';
+import 'package:cow_brain/src/adapters/mlx/mlx_client.dart';
+import 'package:cow_brain/src/adapters/mlx/mlx_handles.dart';
+import 'package:cow_brain/src/isolate/models.dart';
 import 'package:cow_brain/src/model_server/model_server_messages.dart';
 
 /// Factory for creating [LlamaClientApi] instances.
@@ -78,6 +81,15 @@ class _ModelServerState {
       return;
     }
 
+    switch (request.backend) {
+      case InferenceBackend.llamaCpp:
+        _handleLoadLlamaModel(request);
+      case InferenceBackend.mlx:
+        _handleLoadMlxModel(request);
+    }
+  }
+
+  void _handleLoadLlamaModel(LoadModelRequest request) {
     // Initialize backend if needed.
     if (!_backendInitialized) {
       _bindings = LlamaClient.openBindings(libraryPath: request.libraryPath);
@@ -104,14 +116,42 @@ class _ModelServerState {
     final pointer = handles.model.address;
     _models[request.modelPath] = _LoadedModel(
       pointer: pointer,
-      handles: handles,
-      client: client,
+      backend: _LlamaState(handles: handles, client: client),
     );
 
     _sendResponse(
       ModelLoadedResponse(
         modelPath: request.modelPath,
         modelPointer: pointer,
+      ),
+    );
+  }
+
+  void _handleLoadMlxModel(LoadModelRequest request) {
+    final mlxClient = MlxClient(libraryPath: request.libraryPath);
+    final handles = mlxClient.loadModel(
+      modelPath: request.modelPath,
+      onProgress: (progress) {
+        _sendResponse(
+          LoadProgressResponse(
+            modelPath: request.modelPath,
+            progress: progress,
+          ),
+        );
+        return true;
+      },
+    );
+
+    final modelId = handles.modelId;
+    _models[request.modelPath] = _LoadedModel(
+      pointer: modelId,
+      backend: _MlxState(handles: handles, client: mlxClient),
+    );
+
+    _sendResponse(
+      ModelLoadedResponse(
+        modelPath: request.modelPath,
+        modelPointer: modelId,
       ),
     );
   }
@@ -125,7 +165,7 @@ class _ModelServerState {
 
     model.refCount -= 1;
     if (model.refCount <= 0) {
-      model.client.dispose(model.handles);
+      model.dispose();
       _models.remove(request.modelPath);
     }
 
@@ -134,7 +174,7 @@ class _ModelServerState {
 
   void _handleDispose() {
     for (final model in _models.values) {
-      model.client.dispose(model.handles);
+      model.dispose();
     }
     _models.clear();
     if (_backendInitialized) {
@@ -153,17 +193,36 @@ class _ModelServerState {
   }
 }
 
-class _LoadedModel {
-  _LoadedModel({
-    required this.pointer,
-    required this.handles,
-    required this.client,
-  });
+sealed class _BackendState {
+  void dispose();
+}
 
-  final int pointer;
+final class _LlamaState extends _BackendState {
+  _LlamaState({required this.handles, required this.client});
   final LlamaHandles handles;
   final LlamaClientApi client;
+
+  @override
+  void dispose() => client.dispose(handles);
+}
+
+final class _MlxState extends _BackendState {
+  _MlxState({required this.handles, required this.client});
+  final MlxHandles handles;
+  final MlxClientApi client;
+
+  @override
+  void dispose() => client.dispose(handles);
+}
+
+class _LoadedModel {
+  _LoadedModel({required this.pointer, required this.backend});
+
+  final int pointer;
+  final _BackendState backend;
   int refCount = 1;
+
+  void dispose() => backend.dispose();
 }
 
 /// Test-only harness for driving a model server state without spawning an

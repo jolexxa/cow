@@ -51,6 +51,37 @@ void _fakeBrainIsolate(SendPort sendPort) {
   });
 }
 
+void _exitingBrainIsolate(SendPort sendPort) {
+  final receivePort = ReceivePort();
+  sendPort.send(receivePort.sendPort);
+
+  receivePort.listen((message) {
+    if (message is! Map) return;
+    final request = BrainRequest.fromJson(Map<String, Object?>.from(message));
+    if (request.type == BrainRequestType.init) {
+      sendPort.send(const AgentReady().toJson());
+      // Exit the isolate immediately after init.
+      receivePort.close();
+      Isolate.exit();
+    }
+  });
+}
+
+void _erroringBrainIsolate(SendPort sendPort) {
+  final receivePort = ReceivePort();
+  sendPort.send(receivePort.sendPort);
+
+  receivePort.listen((message) {
+    if (message is! Map) return;
+    final request = BrainRequest.fromJson(Map<String, Object?>.from(message));
+    if (request.type == BrainRequestType.init) {
+      sendPort.send(const AgentReady().toJson());
+      // Throw to trigger the error port.
+      throw StateError('isolate crash');
+    }
+  });
+}
+
 void _slowBrainIsolate(SendPort sendPort) {
   final receivePort = ReceivePort();
   sendPort.send(receivePort.sendPort);
@@ -82,9 +113,9 @@ void main() {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
       expect(harness.events, isA<Stream<AgentEvent>>());
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -95,9 +126,9 @@ void main() {
     test('runTurn streams events and completes on turn_finished', () async {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -123,9 +154,9 @@ void main() {
     test('runTurn terminates on error without turn id', () async {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -177,9 +208,9 @@ void main() {
     test('runTurn refuses when a turn is active', () async {
       final harness = BrainHarness(entrypoint: _slowBrainIsolate);
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -206,9 +237,9 @@ void main() {
     test('dispose is idempotent', () async {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -220,9 +251,9 @@ void main() {
     test('operations after dispose throw', () async {
       final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
       await harness.init(
-        modelPointer: 1,
-        runtimeOptions: _runtimeOptions(),
-        profile: LlamaProfileId.qwen3,
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
@@ -237,11 +268,51 @@ void main() {
         throwsStateError,
       );
     });
+
+    test('emits error when isolate exits unexpectedly', () async {
+      final harness = BrainHarness(entrypoint: _exitingBrainIsolate);
+      await harness.init(
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
+        tools: const <ToolDefinition>[],
+        settings: _settings(),
+        enableReasoning: true,
+      );
+
+      // The isolate exits immediately after init — should trigger the exit
+      // port listener and emit an error on the events stream.
+      await expectLater(
+        harness.events,
+        emitsError(isA<StateError>()),
+      );
+
+      await harness.dispose();
+    });
+
+    test('emits error when isolate throws', () async {
+      final harness = BrainHarness(entrypoint: _erroringBrainIsolate);
+      await harness.init(
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
+        tools: const <ToolDefinition>[],
+        settings: _settings(),
+        enableReasoning: true,
+      );
+
+      await expectLater(
+        harness.events,
+        emitsError(isA<StateError>()),
+      );
+
+      await harness.dispose();
+    });
   });
 }
 
-LlamaRuntimeOptions _runtimeOptions() {
-  return const LlamaRuntimeOptions(
+LlamaCppRuntimeOptions _runtimeOptions() {
+  return const LlamaCppRuntimeOptions(
     modelPath: '/tmp/model.gguf',
     libraryPath: '/tmp/libllama.so',
     contextOptions: LlamaContextOptions(

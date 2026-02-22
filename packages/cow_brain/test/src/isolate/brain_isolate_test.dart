@@ -3,6 +3,7 @@ import 'dart:ffi';
 import 'dart:isolate';
 
 import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/mlx/mlx.dart';
 import 'package:cow_brain/src/agent/agent.dart';
 import 'package:cow_brain/src/context/context.dart';
 import 'package:cow_brain/src/core/core.dart';
@@ -13,12 +14,14 @@ import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 
+import '../../fixtures/fake_mlx_bindings.dart';
+
 const _defaultSettings = AgentSettings(
   safetyMarginTokens: 64,
   maxSteps: 8,
 );
 
-const _runtimeOptions = LlamaRuntimeOptions(
+const _runtimeOptions = LlamaCppRuntimeOptions(
   modelPath: '/tmp/model.gguf',
   libraryPath: '/tmp/libllama.so',
   contextOptions: LlamaContextOptions(
@@ -176,6 +179,43 @@ final class _FakeContextManager implements ContextManager {
 final class _MockLlamaClient extends Mock implements LlamaClientApi {}
 
 final class _MockBindings extends Mock implements LlamaBindings {}
+
+final class _FakeMlxClient implements MlxClientApi {
+  @override
+  MlxHandles loadModel({
+    required String modelPath,
+    MlxModelLoadProgressCallback? onProgress,
+  }) => throw UnimplementedError();
+
+  @override
+  List<int> tokenize(
+    MlxHandles handles,
+    String text, {
+    bool addSpecial = true,
+  }) => [1, 2, 3];
+
+  @override
+  int createContext(MlxHandles handles, int maxTokens) => 10;
+
+  @override
+  void resetContext(MlxHandles handles, int maxTokens) {}
+
+  @override
+  bool isEog(MlxHandles handles, int token) => false;
+
+  @override
+  void generateBegin(
+    MlxHandles handles,
+    List<int> tokens,
+    SamplingOptions options,
+  ) {}
+
+  @override
+  List<int>? generateNext(MlxHandles handles, {int bufferSize = 256}) => null;
+
+  @override
+  void dispose(MlxHandles handles) {}
+}
 
 final class _ThrowingAgentRunner implements AgentRunner {
   _ThrowingAgentRunner({
@@ -356,8 +396,8 @@ void main() {
         bundleFactory:
             ({
               required int modelPointer,
-              required LlamaRuntimeOptions runtimeOptions,
-              required LlamaProfileId profile,
+              required BackendRuntimeOptions options,
+              required ModelProfileId profile,
               required ToolRegistry tools,
               required Conversation conversation,
               required int contextSize,
@@ -369,7 +409,7 @@ void main() {
               capturedTools = tools;
               return _fakeBundleFactory(
                 modelPointer: modelPointer,
-                runtimeOptions: runtimeOptions,
+                options: options,
                 profile: profile,
                 tools: tools,
                 conversation: conversation,
@@ -448,8 +488,8 @@ void main() {
         bundleFactory:
             ({
               required int modelPointer,
-              required LlamaRuntimeOptions runtimeOptions,
-              required LlamaProfileId profile,
+              required BackendRuntimeOptions options,
+              required ModelProfileId profile,
               required ToolRegistry tools,
               required Conversation conversation,
               required int contextSize,
@@ -499,8 +539,8 @@ void main() {
             bundleFactory:
                 ({
                   required int modelPointer,
-                  required LlamaRuntimeOptions runtimeOptions,
-                  required LlamaProfileId profile,
+                  required BackendRuntimeOptions options,
+                  required ModelProfileId profile,
                   required ToolRegistry tools,
                   required Conversation conversation,
                   required int contextSize,
@@ -650,6 +690,58 @@ void main() {
       receivePort.close();
     });
 
+    test('creates MlxRuntime for MlxRuntimeOptions', () async {
+      final receivePort = ReceivePort();
+      final iterator = StreamIterator(receivePort);
+      final mlxBindings = FakeMlxBindings(
+        modelFromIdResult: 5,
+      );
+      final mlxClient = _FakeMlxClient();
+
+      final previousClientOverride = brainMlxRuntimeClientOverride;
+      final previousBindingsOverride = brainMlxRuntimeBindingsOverride;
+      brainMlxRuntimeClientOverride = mlxClient;
+      brainMlxRuntimeBindingsOverride = mlxBindings;
+      addTearDown(() {
+        brainMlxRuntimeClientOverride = previousClientOverride;
+        brainMlxRuntimeBindingsOverride = previousBindingsOverride;
+      });
+
+      const mlxOptions = MlxRuntimeOptions(
+        modelPath: '/tmp/model.mlx',
+        libraryPath: '/tmp/libmlx.dylib',
+        contextSize: 2048,
+      );
+
+      final harness = BrainIsolateTestHarness(receivePort.sendPort)
+        ..handleMessage(
+          const BrainRequest(
+            type: BrainRequestType.init,
+            init: InitRequest(
+              modelHandle: 5,
+              options: mlxOptions,
+              profile: ModelProfileId.qwen3,
+              tools: [],
+              settings: _defaultSettings,
+              enableReasoning: true,
+            ),
+          ).toJson(),
+        );
+
+      await iterator.moveNext();
+      final event = AgentEvent.fromJson(
+        Map<String, Object?>.from(iterator.current as Map),
+      );
+      expect(event, isA<AgentReady>());
+
+      harness.handleMessage(
+        const BrainRequest(type: BrainRequestType.dispose).toJson(),
+      );
+
+      await iterator.cancel();
+      receivePort.close();
+    });
+
     test('run_turn without payload emits error', () async {
       final receivePort = ReceivePort();
 
@@ -677,8 +769,8 @@ void main() {
             bundleFactory:
                 ({
                   required int modelPointer,
-                  required LlamaRuntimeOptions runtimeOptions,
-                  required LlamaProfileId profile,
+                  required BackendRuntimeOptions options,
+                  required ModelProfileId profile,
                   required ToolRegistry tools,
                   required Conversation conversation,
                   required int contextSize,
@@ -730,8 +822,8 @@ void main() {
             bundleFactory:
                 ({
                   required int modelPointer,
-                  required LlamaRuntimeOptions runtimeOptions,
-                  required LlamaProfileId profile,
+                  required BackendRuntimeOptions options,
+                  required ModelProfileId profile,
                   required ToolRegistry tools,
                   required Conversation conversation,
                   required int contextSize,
@@ -794,8 +886,8 @@ void main() {
             bundleFactory:
                 ({
                   required int modelPointer,
-                  required LlamaRuntimeOptions runtimeOptions,
-                  required LlamaProfileId profile,
+                  required BackendRuntimeOptions options,
+                  required ModelProfileId profile,
                   required ToolRegistry tools,
                   required Conversation conversation,
                   required int contextSize,
@@ -856,8 +948,8 @@ void main() {
             bundleFactory:
                 ({
                   required int modelPointer,
-                  required LlamaRuntimeOptions runtimeOptions,
-                  required LlamaProfileId profile,
+                  required BackendRuntimeOptions options,
+                  required ModelProfileId profile,
                   required ToolRegistry tools,
                   required Conversation conversation,
                   required int contextSize,
@@ -934,8 +1026,8 @@ void main() {
             bundleFactory:
                 ({
                   required int modelPointer,
-                  required LlamaRuntimeOptions runtimeOptions,
-                  required LlamaProfileId profile,
+                  required BackendRuntimeOptions options,
+                  required ModelProfileId profile,
                   required ToolRegistry tools,
                   required Conversation conversation,
                   required int contextSize,
@@ -982,8 +1074,8 @@ void main() {
             bundleFactory:
                 ({
                   required int modelPointer,
-                  required LlamaRuntimeOptions runtimeOptions,
-                  required LlamaProfileId profile,
+                  required BackendRuntimeOptions options,
+                  required ModelProfileId profile,
                   required ToolRegistry tools,
                   required Conversation conversation,
                   required int contextSize,
@@ -1061,8 +1153,8 @@ void main() {
             bundleFactory:
                 ({
                   required int modelPointer,
-                  required LlamaRuntimeOptions runtimeOptions,
-                  required LlamaProfileId profile,
+                  required BackendRuntimeOptions options,
+                  required ModelProfileId profile,
                   required ToolRegistry tools,
                   required Conversation conversation,
                   required int contextSize,
@@ -1175,8 +1267,8 @@ void main() {
             bundleFactory:
                 ({
                   required int modelPointer,
-                  required LlamaRuntimeOptions runtimeOptions,
-                  required LlamaProfileId profile,
+                  required BackendRuntimeOptions options,
+                  required ModelProfileId profile,
                   required ToolRegistry tools,
                   required Conversation conversation,
                   required int contextSize,
@@ -1236,8 +1328,8 @@ void main() {
             bundleFactory:
                 ({
                   required int modelPointer,
-                  required LlamaRuntimeOptions runtimeOptions,
-                  required LlamaProfileId profile,
+                  required BackendRuntimeOptions options,
+                  required ModelProfileId profile,
                   required ToolRegistry tools,
                   required Conversation conversation,
                   required int contextSize,
@@ -1292,8 +1384,8 @@ void main() {
             bundleFactory:
                 ({
                   required int modelPointer,
-                  required LlamaRuntimeOptions runtimeOptions,
-                  required LlamaProfileId profile,
+                  required BackendRuntimeOptions options,
+                  required ModelProfileId profile,
                   required ToolRegistry tools,
                   required Conversation conversation,
                   required int contextSize,
@@ -1349,8 +1441,8 @@ void main() {
 
 AgentBundle _fakeBundleFactory({
   required int modelPointer,
-  required LlamaRuntimeOptions runtimeOptions,
-  required LlamaProfileId profile,
+  required BackendRuntimeOptions options,
+  required ModelProfileId profile,
   required ToolRegistry tools,
   required Conversation conversation,
   required int contextSize,
@@ -1373,9 +1465,9 @@ InitRequest _initRequest({
   List<ToolDefinition> tools = const <ToolDefinition>[],
 }) {
   return InitRequest(
-    modelPointer: 1,
-    runtimeOptions: _runtimeOptions,
-    profile: LlamaProfileId.qwen3,
+    modelHandle: 1,
+    options: _runtimeOptions,
+    profile: ModelProfileId.qwen3,
     tools: tools,
     settings: _defaultSettings,
     enableReasoning: true,

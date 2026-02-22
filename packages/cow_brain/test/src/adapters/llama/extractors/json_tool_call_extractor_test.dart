@@ -1,4 +1,4 @@
-import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/extractors/json_tool_call_extractor.dart';
 import 'package:test/test.dart';
 
 void main() {

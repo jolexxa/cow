@@ -310,7 +310,7 @@ void main() {
 
       final sampler = LlamaSamplerChain.build(
         bindings,
-        const LlamaSamplingOptions(),
+        const SamplingOptions(),
       );
 
       final value = client.sampleNext(handles, sampler);
@@ -322,7 +322,7 @@ void main() {
     test('sampler chain adds expected samplers for greedy and temp modes', () {
       final greedy = LlamaSamplerChain.build(
         bindings,
-        const LlamaSamplingOptions(
+        const SamplingOptions(
           temperature: 0,
           topK: 10,
           topP: 0.9,
@@ -342,7 +342,7 @@ void main() {
 
       final temp = LlamaSamplerChain.build(
         bindings,
-        const LlamaSamplingOptions(
+        const SamplingOptions(
           temperature: 0.7,
           topK: 40,
           topP: 0.95,

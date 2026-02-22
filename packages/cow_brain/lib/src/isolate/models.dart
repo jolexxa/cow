@@ -35,13 +35,21 @@ enum FinishReason {
 }
 
 @JsonEnum(alwaysCreate: true)
-enum LlamaProfileId {
+enum ModelProfileId {
   @JsonValue('qwen3')
   qwen3,
   @JsonValue('qwen25')
   qwen25,
   @JsonValue('auto')
   auto,
+}
+
+@JsonEnum(alwaysCreate: true)
+enum InferenceBackend {
+  @JsonValue('llama_cpp')
+  llamaCpp,
+  @JsonValue('mlx')
+  mlx,
 }
 
 @JsonEnum(alwaysCreate: true)
@@ -169,25 +177,53 @@ class LlmConfig {
   Map<String, Object?> toJson() => _$LlmConfigToJson(this);
 }
 
+sealed class BackendRuntimeOptions {
+  const BackendRuntimeOptions();
+  factory BackendRuntimeOptions.fromJson(Map<String, Object?> json) {
+    final backend = $enumDecode(_$InferenceBackendEnumMap, json['backend']);
+    return switch (backend) {
+      InferenceBackend.llamaCpp => LlamaCppRuntimeOptions.fromJson(json),
+      InferenceBackend.mlx => MlxRuntimeOptions.fromJson(json),
+    };
+  }
+  InferenceBackend get backend;
+  String get modelPath;
+  String get libraryPath;
+  int get contextSize;
+  int get maxOutputTokensDefault;
+  SamplingOptions get samplingOptions;
+  Map<String, Object?> toJson();
+}
+
 @JsonSerializable(explicitToJson: true)
-class LlamaRuntimeOptions {
-  const LlamaRuntimeOptions({
+final class LlamaCppRuntimeOptions extends BackendRuntimeOptions {
+  const LlamaCppRuntimeOptions({
     required this.modelPath,
     required this.contextOptions,
     required this.libraryPath,
     this.modelOptions = const LlamaModelOptions(),
-    this.samplingOptions = const LlamaSamplingOptions(),
+    this.samplingOptions = const SamplingOptions(),
     this.maxOutputTokensDefault = 512,
+    this.backend = InferenceBackend.llamaCpp,
   });
-  factory LlamaRuntimeOptions.fromJson(Map<String, Object?> json) =>
-      _$LlamaRuntimeOptionsFromJson(json);
+  factory LlamaCppRuntimeOptions.fromJson(Map<String, Object?> json) =>
+      _$LlamaCppRuntimeOptionsFromJson(json);
+  @override
+  final InferenceBackend backend;
+  @override
   final String modelPath;
   final LlamaModelOptions modelOptions;
   final LlamaContextOptions contextOptions;
-  final LlamaSamplingOptions samplingOptions;
+  @override
+  final SamplingOptions samplingOptions;
+  @override
   final int maxOutputTokensDefault;
+  @override
   final String libraryPath;
-  Map<String, Object?> toJson() => _$LlamaRuntimeOptionsToJson(this);
+  @override
+  int get contextSize => contextOptions.contextSize;
+  @override
+  Map<String, Object?> toJson() => _$LlamaCppRuntimeOptionsToJson(this);
 }
 
 @JsonSerializable()
@@ -231,8 +267,8 @@ class LlamaContextOptions {
 }
 
 @JsonSerializable()
-class LlamaSamplingOptions {
-  const LlamaSamplingOptions({
+class SamplingOptions {
+  const SamplingOptions({
     this.seed = 0,
     this.topK,
     this.topP,
@@ -242,8 +278,8 @@ class LlamaSamplingOptions {
     this.penaltyRepeat,
     this.penaltyLastN,
   });
-  factory LlamaSamplingOptions.fromJson(Map<String, Object?> json) =>
-      _$LlamaSamplingOptionsFromJson(json);
+  factory SamplingOptions.fromJson(Map<String, Object?> json) =>
+      _$SamplingOptionsFromJson(json);
   final int seed;
   final int? topK;
   final double? topP;
@@ -252,7 +288,47 @@ class LlamaSamplingOptions {
   final double? typicalP;
   final double? penaltyRepeat;
   final int? penaltyLastN;
-  Map<String, Object?> toJson() => _$LlamaSamplingOptionsToJson(this);
+  Map<String, Object?> toJson() => _$SamplingOptionsToJson(this);
+}
+
+@JsonSerializable(explicitToJson: true)
+final class MlxRuntimeOptions extends BackendRuntimeOptions {
+  const MlxRuntimeOptions({
+    required this.modelPath,
+    required this.libraryPath,
+    required this.contextSize,
+    this.samplingOptions = const SamplingOptions(),
+    this.maxOutputTokensDefault = 512,
+    this.backend = InferenceBackend.mlx,
+  });
+  factory MlxRuntimeOptions.fromJson(Map<String, Object?> json) =>
+      _$MlxRuntimeOptionsFromJson(json);
+
+  @override
+  final InferenceBackend backend;
+
+  /// Path to the MLX model directory (HuggingFace layout).
+  @override
+  final String modelPath;
+
+  /// Path to the libCowMLX.dylib native library.
+  @override
+  final String libraryPath;
+
+  /// Maximum context window size.
+  @override
+  final int contextSize;
+
+  /// Sampling parameters (reused from llama.cpp — same fields).
+  @override
+  final SamplingOptions samplingOptions;
+
+  /// Maximum output tokens per generation.
+  @override
+  final int maxOutputTokensDefault;
+
+  @override
+  Map<String, Object?> toJson() => _$MlxRuntimeOptionsToJson(this);
 }
 
 @JsonSerializable()
@@ -271,8 +347,8 @@ class AgentSettings {
 @JsonSerializable(explicitToJson: true)
 class InitRequest {
   const InitRequest({
-    required this.modelPointer,
-    required this.runtimeOptions,
+    required this.modelHandle,
+    required this.options,
     required this.profile,
     required this.tools,
     required this.settings,
@@ -281,11 +357,16 @@ class InitRequest {
   factory InitRequest.fromJson(Map<String, Object?> json) =>
       _$InitRequestFromJson(json);
 
-  /// Address of the preloaded llama_model pointer from ModelServer.
-  final int modelPointer;
-  final LlamaRuntimeOptions runtimeOptions;
-  @JsonKey(unknownEnumValue: LlamaProfileId.qwen3)
-  final LlamaProfileId profile;
+  /// For llama.cpp: address of the preloaded llama_model pointer.
+  /// For MLX: the model ID from cow_mlx_model_get_id.
+  @JsonKey(name: 'modelPointer')
+  final int modelHandle;
+
+  /// Backend-specific runtime options.
+  final BackendRuntimeOptions options;
+
+  @JsonKey(unknownEnumValue: ModelProfileId.qwen3)
+  final ModelProfileId profile;
   final List<ToolDefinition> tools;
   final AgentSettings settings;
   final bool enableReasoning;

@@ -1,36 +1,37 @@
 // Integration helpers compose existing contracts; docs can follow.
 // ignore_for_file: public_member_api_docs
 
-import 'package:cow_brain/src/adapters/llama/llama_adapter.dart';
+import 'package:cow_brain/src/adapters/inference_adapter.dart';
 import 'package:cow_brain/src/adapters/llama/llama_cpp_runtime.dart';
-import 'package:cow_brain/src/adapters/llama/llama_profile_detector.dart';
-import 'package:cow_brain/src/adapters/llama/llama_profiles.dart';
-import 'package:cow_brain/src/adapters/llama/llama_prompt_formatter.dart';
+import 'package:cow_brain/src/adapters/model_profiles.dart';
+import 'package:cow_brain/src/adapters/profile_detector.dart';
+import 'package:cow_brain/src/adapters/prompt_formatter.dart';
 import 'package:cow_brain/src/agent/agent_loop.dart';
 import 'package:cow_brain/src/context/context.dart';
 import 'package:cow_brain/src/context/context_manager.dart';
 import 'package:cow_brain/src/core/conversation.dart';
+import 'package:cow_brain/src/isolate/brain_isolate.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:cow_brain/src/tools/tool_registry.dart';
 
 ({
   AgentLoop agent,
   Conversation conversation,
-  LlamaAdapter llm,
+  InferenceAdapter llm,
   ToolRegistry tools,
   ContextManager context,
 })
 createAgentWithLlama({
-  required LlamaRuntime runtime,
+  required InferenceRuntime runtime,
   required int contextSize,
   required int maxOutputTokens,
   required double temperature,
-  required LlamaModelProfile profile,
+  required ModelProfile profile,
   required ToolRegistry tools,
   required Conversation conversation,
   required int safetyMarginTokens,
 }) {
-  final llm = LlamaAdapter(runtime: runtime, profile: profile);
+  final llm = InferenceAdapter(runtime: runtime, profile: profile);
   final toolRegistry = tools;
   final convo = conversation;
   final contextManager = SlidingWindowContextManager(
@@ -59,46 +60,59 @@ createAgentWithLlama({
 ({
   AgentLoop agent,
   Conversation conversation,
-  LlamaAdapter llm,
+  InferenceAdapter llm,
   ToolRegistry tools,
   ContextManager context,
-  LlamaCppRuntime runtime,
+  BrainRuntime runtime,
 })
 createAgent({
   required int modelPointer,
-  required LlamaRuntimeOptions runtimeOptions,
+  required BackendRuntimeOptions options,
   required ToolRegistry tools,
   required Conversation conversation,
-  required LlamaProfileId profileId,
+  required ModelProfileId profileId,
   required int contextSize,
   required int maxOutputTokens,
   required double temperature,
   required int safetyMarginTokens,
-  required LlamaCppRuntime Function({
+  required BrainRuntime Function({
     required int modelPointer,
-    required LlamaRuntimeOptions options,
+    required BackendRuntimeOptions options,
   })
   runtimeFactory,
 }) {
   final runtime = runtimeFactory(
     modelPointer: modelPointer,
-    options: runtimeOptions,
+    options: options,
   );
-  final profile = profileId == LlamaProfileId.auto
-      ? detectProfileFromRuntime(runtime, fallback: LlamaProfiles.qwen3)
-      : LlamaProfiles.profileFor(profileId);
 
-  if (contextSize > runtimeOptions.contextOptions.contextSize) {
-    throw ArgumentError.value(
-      contextSize,
-      'contextSize',
-      'must be <= runtimeOptions.contextOptions.contextSize '
-          '(${runtimeOptions.contextOptions.contextSize})',
+  // Profile detection: only auto-detect from chat template for llama.cpp
+  // (MLX models don't have GGUF metadata). For MLX, require explicit profile.
+  ModelProfile profile;
+  if (profileId == ModelProfileId.auto && runtime is LlamaCppRuntime) {
+    profile = detectProfileFromRuntime(
+      runtime,
+      fallback: ModelProfiles.qwen3,
+    );
+  } else {
+    profile = ModelProfiles.profileFor(
+      profileId == ModelProfileId.auto ? ModelProfileId.qwen3 : profileId,
     );
   }
 
+  // Validate context size against the backend's configured size.
+  if (contextSize > options.contextSize) {
+    throw ArgumentError.value(
+      contextSize,
+      'contextSize',
+      'must be <= configured context size (${options.contextSize})',
+    );
+  }
+
+  // Both LlamaCppRuntime and MlxRuntime implement InferenceRuntime.
+  final llamaRuntime = runtime as InferenceRuntime;
   final bundle = createAgentWithLlama(
-    runtime: runtime,
+    runtime: llamaRuntime,
     tools: tools,
     conversation: conversation,
     contextSize: contextSize,
@@ -122,11 +136,11 @@ createAgent({
 ///
 /// Returns the detected profile, or [fallback] if the chat template is
 /// unavailable or unrecognized.
-LlamaModelProfile detectProfileFromRuntime(
+ModelProfile detectProfileFromRuntime(
   LlamaCppRuntime runtime, {
-  required LlamaModelProfile fallback,
+  required ModelProfile fallback,
 }) {
   final template = runtime.chatTemplate;
   if (template == null) return fallback;
-  return const LlamaProfileDetector().detect(template) ?? fallback;
+  return const ProfileDetector().detect(template) ?? fallback;
 }

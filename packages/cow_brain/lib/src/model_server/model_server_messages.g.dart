@@ -15,6 +15,13 @@ LoadModelRequest _$LoadModelRequestFromJson(Map<String, dynamic> json) =>
           : LlamaModelOptions.fromJson(
               json['modelOptions'] as Map<String, dynamic>,
             ),
+      backend:
+          $enumDecodeNullable(
+            _$InferenceBackendEnumMap,
+            json['backend'],
+            unknownValue: InferenceBackend.llamaCpp,
+          ) ??
+          InferenceBackend.llamaCpp,
       type:
           $enumDecodeNullable(_$ModelServerRequestTypeEnumMap, json['type']) ??
           ModelServerRequestType.loadModel,
@@ -26,7 +33,13 @@ Map<String, dynamic> _$LoadModelRequestToJson(LoadModelRequest instance) =>
       'modelPath': instance.modelPath,
       'libraryPath': instance.libraryPath,
       'modelOptions': instance.modelOptions.toJson(),
+      'backend': _$InferenceBackendEnumMap[instance.backend]!,
     };
+
+const _$InferenceBackendEnumMap = {
+  InferenceBackend.llamaCpp: 'llama_cpp',
+  InferenceBackend.mlx: 'mlx',
+};
 
 const _$ModelServerRequestTypeEnumMap = {
   ModelServerRequestType.loadModel: 'load_model',

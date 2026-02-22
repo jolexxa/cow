@@ -8,31 +8,27 @@ import 'package:cow_brain/src/isolate/models.dart';
 import 'package:cow_brain/src/model_server/model_server.dart';
 
 class CowBrain {
-  CowBrain({required String libraryPath, BrainHarness? harness})
+  CowBrain({BrainHarness? harness})
     : _harness = harness ?? BrainHarness(),
-      _libraryPath = libraryPath,
       _ownsBackend = true;
 
   CowBrain._shared({
     required BrainHarness? harness,
-    required String libraryPath,
   }) : _harness = harness ?? BrainHarness(),
-       _libraryPath = libraryPath,
        _ownsBackend = false;
 
   static LlamaBindings? _bindings;
   static int _backendRefCount = 0;
 
   final BrainHarness _harness;
-  final String _libraryPath;
   final bool _ownsBackend;
   bool _acquired = false;
 
-  void _ensureBackendInitialized() {
+  void _ensureBackendInitialized(String libraryPath) {
     if (_acquired) return;
     _acquired = true;
     if (_backendRefCount == 0) {
-      _bindings = LlamaClient.openBindings(libraryPath: _libraryPath);
+      _bindings = LlamaClient.openBindings(libraryPath: libraryPath);
       _bindings!.llama_backend_init();
     }
     _backendRefCount += 1;
@@ -49,17 +45,19 @@ class CowBrain {
   }
 
   Future<void> init({
-    required int modelPointer,
-    required LlamaRuntimeOptions runtimeOptions,
-    required LlamaProfileId profile,
+    required int modelHandle,
+    required BackendRuntimeOptions options,
+    required ModelProfileId profile,
     required List<ToolDefinition> tools,
     required AgentSettings settings,
     required bool enableReasoning,
   }) {
-    _ensureBackendInitialized();
+    if (options is LlamaCppRuntimeOptions) {
+      _ensureBackendInitialized(options.libraryPath);
+    }
     return _harness.init(
-      modelPointer: modelPointer,
-      runtimeOptions: runtimeOptions,
+      modelHandle: modelHandle,
+      options: options,
       profile: profile,
       tools: tools,
       settings: settings,
@@ -135,6 +133,8 @@ final class CowBrains<TKey> {
   Future<LoadedModel> loadModel({
     required String modelPath,
     LlamaModelOptions modelOptions = const LlamaModelOptions(),
+    InferenceBackend backend = InferenceBackend.llamaCpp,
+    String? libraryPathOverride,
     ModelLoadProgressCallback? onProgress,
   }) async {
     // Return existing if already loaded.
@@ -143,8 +143,9 @@ final class CowBrains<TKey> {
 
     final model = await _modelServer.loadModel(
       modelPath: modelPath,
-      libraryPath: _libraryPath,
+      libraryPath: libraryPathOverride ?? _libraryPath,
       modelOptions: modelOptions,
+      backend: backend,
       onProgress: onProgress,
     );
     _models[modelPath] = model;
@@ -161,10 +162,7 @@ final class CowBrains<TKey> {
     if (existing != null) {
       return existing;
     }
-    final brain = CowBrain._shared(
-      harness: harness,
-      libraryPath: _libraryPath,
-    );
+    final brain = CowBrain._shared(harness: harness);
     _brains[key] = brain;
     return brain;
   }

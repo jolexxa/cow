@@ -96,11 +96,17 @@ jobs:
         with:
           sdk: stable
 
-      - name: Get packages
-        run: dart pub get
+      - name: Install dependencies
+        run: |
+          dart pub global activate very_good_cli
+          very_good packages get -r
 
       - name: Download llama.cpp assets
         run: dart ./tool/download_llama_assets.dart
+
+      - name: Build CowMLX
+        if: matrix.asset_os == 'macos'
+        run: packages/cow_mlx/build.sh
 
       - name: Build bundle
         shell: bash
@@ -111,12 +117,23 @@ jobs:
 
           rm -rf "${bundle_dir}"
 
-          dart build cli -o "build/cli/${platform}" -t bin/cow.dart
+          cd packages/cow
+          dart build cli -o "../../build/cli/${platform}"
+          cd ../..
 
+          # Bundle llama.cpp native libraries.
           rsync -a \
             "packages/llama_cpp_dart/assets/native/${{ matrix.asset_os }}/${{ matrix.asset_arch }}/" \
             "${bundle_dir}/lib/" \
             --exclude ".gitkeep"
+
+          # Bundle CowMLX native libraries (macOS only).
+          if [ "${{ matrix.asset_os }}" = "macos" ]; then
+            rsync -a \
+              "packages/cow_mlx/.build/release/libCowMLX.dylib" \
+              "packages/cow_mlx/.build/release/mlx.metallib" \
+              "${bundle_dir}/lib/"
+          fi
 
       - name: Package artifact
         shell: bash

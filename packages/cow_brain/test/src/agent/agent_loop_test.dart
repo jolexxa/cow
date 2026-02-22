@@ -606,6 +606,253 @@ void main() {
       },
     );
   });
+
+  group('incremental context & KV cache management', () {
+    test('chains previousSlice across multi-step tool loop', () async {
+      final slice1 = ContextSlice(
+        messages: const [Message(role: Role.user, content: 'Hi')],
+        estimatedPromptTokens: 10,
+        droppedMessageCount: 0,
+        contextSize: 512,
+        maxOutputTokens: 64,
+        safetyMarginTokens: 0,
+        budgetTokens: 448,
+        remainingTokens: 438,
+        reusePrefixMessageCount: 0,
+        requiresReset: false,
+      );
+      final slice2 = ContextSlice(
+        messages: const [Message(role: Role.user, content: 'Hi')],
+        estimatedPromptTokens: 12,
+        droppedMessageCount: 0,
+        contextSize: 512,
+        maxOutputTokens: 64,
+        safetyMarginTokens: 0,
+        budgetTokens: 448,
+        remainingTokens: 436,
+        reusePrefixMessageCount: 1,
+        requiresReset: false,
+      );
+
+      final llm = FakeLlmAdapter([
+        const [
+          OutputToolCalls([
+            ToolCall(id: 'call-1', name: 'search', arguments: {'q': 'cow'}),
+          ]),
+          OutputStepFinished(FinishReason.stop),
+        ],
+        const [
+          OutputTextDelta('Done.'),
+          OutputStepFinished(FinishReason.stop),
+        ],
+      ]);
+
+      final tools = ToolRegistry()
+        ..register(
+          const ToolDefinition(
+            name: 'search',
+            description: 'Search',
+            parameters: {},
+          ),
+          (args) => 'ok',
+        );
+
+      final context = RecordingContextManager([slice1, slice2]);
+
+      final loop = _buildLoop(
+        llm: llm,
+        tools: tools,
+        context: context,
+      );
+
+      final convo = Conversation.initial().addUser('Hi');
+      await loop.runTurn(convo).toList();
+
+      // First call has no previousSlice.
+      expect(context.calls[0].previousSlice, isNull);
+      // Second call gets slice1 as previousSlice.
+      expect(context.calls[1].previousSlice, same(slice1));
+    });
+
+    test(
+      'sends incremental reuse count and no reset for append-only steps',
+      () async {
+        final llm = FakeLlmAdapter([
+          const [
+            OutputToolCalls([
+              ToolCall(
+                id: 'call-1',
+                name: 'search',
+                arguments: {'q': 'cow'},
+              ),
+            ]),
+            OutputStepFinished(FinishReason.stop),
+          ],
+          const [
+            OutputTextDelta('Done.'),
+            OutputStepFinished(FinishReason.stop),
+          ],
+        ]);
+
+        final tools = ToolRegistry()
+          ..register(
+            const ToolDefinition(
+              name: 'search',
+              description: 'Search',
+              parameters: {},
+            ),
+            (args) => 'ok',
+          );
+
+        final loop = _buildLoop(
+          llm: llm,
+          tools: tools,
+          contextSize: 512,
+          maxOutputTokens: 64,
+        );
+
+        final convo = Conversation.initial().addUser('Hi');
+        await loop.runTurn(convo).toList();
+
+        // Step 1: no previous context, so reuse=0.
+        expect(llm.receivedConfigs[0].requiresReset, isFalse);
+        expect(llm.receivedConfigs[0].reusePrefixMessageCount, 0);
+
+        // Step 2: conversation grew, passthrough context manager
+        // sets reuse to previous message count.
+        expect(llm.receivedConfigs[1].requiresReset, isFalse);
+        expect(
+          llm.receivedConfigs[1].reusePrefixMessageCount,
+          greaterThan(0),
+        );
+      },
+    );
+
+    test(
+      'sends requiresReset=true when context manager signals prefix break',
+      () async {
+        final llm = FakeLlmAdapter([
+          const [
+            OutputStepFinished(FinishReason.stop),
+          ],
+        ]);
+
+        final context = RecordingContextManager([
+          ContextSlice(
+            messages: const [Message(role: Role.user, content: 'Hi')],
+            estimatedPromptTokens: 10,
+            droppedMessageCount: 1,
+            contextSize: 512,
+            maxOutputTokens: 64,
+            safetyMarginTokens: 0,
+            budgetTokens: 448,
+            remainingTokens: 438,
+            reusePrefixMessageCount: 1,
+            requiresReset: true,
+          ),
+          // Second prepare call after systemApplied reset.
+          ContextSlice(
+            messages: const [Message(role: Role.user, content: 'Hi')],
+            estimatedPromptTokens: 10,
+            droppedMessageCount: 1,
+            contextSize: 512,
+            maxOutputTokens: 64,
+            safetyMarginTokens: 0,
+            budgetTokens: 448,
+            remainingTokens: 438,
+            reusePrefixMessageCount: 0,
+            requiresReset: false,
+          ),
+        ]);
+
+        final loop = _buildLoop(
+          llm: llm,
+          context: context,
+        );
+
+        final convo = Conversation.initial(systemPrompt: 'System')
+          ..setSystemApplied(value: true)
+          ..addUser('Hi');
+        await loop.runTurn(convo).toList();
+
+        final config = llm.receivedConfigs.single;
+        expect(config.requiresReset, isTrue);
+        expect(config.reusePrefixMessageCount, 0);
+      },
+    );
+
+    test(
+      'previousSlice is null on first step, set on subsequent steps',
+      () async {
+        final llm = FakeLlmAdapter([
+          const [
+            OutputToolCalls([
+              ToolCall(
+                id: 'call-1',
+                name: 'search',
+                arguments: {'q': 'cow'},
+              ),
+            ]),
+            OutputStepFinished(FinishReason.stop),
+          ],
+          const [
+            OutputTextDelta('Done.'),
+            OutputStepFinished(FinishReason.stop),
+          ],
+        ]);
+
+        final tools = ToolRegistry()
+          ..register(
+            const ToolDefinition(
+              name: 'search',
+              description: 'Search',
+              parameters: {},
+            ),
+            (args) => 'ok',
+          );
+
+        final context = RecordingContextManager([
+          ContextSlice(
+            messages: const [Message(role: Role.user, content: 'Hi')],
+            estimatedPromptTokens: 10,
+            droppedMessageCount: 0,
+            contextSize: 512,
+            maxOutputTokens: 64,
+            safetyMarginTokens: 0,
+            budgetTokens: 448,
+            remainingTokens: 438,
+            reusePrefixMessageCount: 0,
+            requiresReset: false,
+          ),
+          ContextSlice(
+            messages: const [Message(role: Role.user, content: 'Hi')],
+            estimatedPromptTokens: 12,
+            droppedMessageCount: 0,
+            contextSize: 512,
+            maxOutputTokens: 64,
+            safetyMarginTokens: 0,
+            budgetTokens: 448,
+            remainingTokens: 436,
+            reusePrefixMessageCount: 1,
+            requiresReset: false,
+          ),
+        ]);
+
+        final loop = _buildLoop(
+          llm: llm,
+          tools: tools,
+          context: context,
+        );
+
+        final convo = Conversation.initial().addUser('Hi');
+        await loop.runTurn(convo).toList();
+
+        expect(context.calls, hasLength(2));
+        expect(context.calls[0].previousSlice, isNull);
+        expect(context.calls[1].previousSlice, isNotNull);
+      },
+    );
+  });
 }
 
 AgentLoop _buildLoop({

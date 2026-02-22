@@ -1,4 +1,4 @@
-import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/stream_tokenizer.dart';
 import 'package:test/test.dart';
 
 void main() {

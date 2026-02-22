@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:isolate';
 
 import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/mlx/mlx.dart';
 import 'package:cow_brain/src/agent/agent_runner.dart';
 import 'package:cow_brain/src/agent/agent_setup.dart';
 import 'package:cow_brain/src/context/context.dart';
@@ -31,8 +32,8 @@ typedef AgentBundle = ({
 typedef AgentBundleFactory =
     AgentBundle Function({
       required int modelPointer,
-      required LlamaRuntimeOptions runtimeOptions,
-      required LlamaProfileId profile,
+      required BackendRuntimeOptions options,
+      required ModelProfileId profile,
       required ToolRegistry tools,
       required Conversation conversation,
       required int contextSize,
@@ -44,27 +45,48 @@ typedef AgentBundleFactory =
 // Test hooks to override the runtime factory without loading native libraries.
 LlamaClientApi? brainRuntimeClientOverride;
 LlamaBindings? brainRuntimeBindingsOverride;
-LlamaCppRuntime Function({
+MlxClientApi? brainMlxRuntimeClientOverride;
+MlxBindings? brainMlxRuntimeBindingsOverride;
+
+BrainRuntime Function({
   required int modelPointer,
-  required LlamaRuntimeOptions options,
+  required BackendRuntimeOptions options,
 })
 brainRuntimeFactory = _createRuntime;
 
-LlamaCppRuntime _createRuntime({
+BrainRuntime _createRuntime({
   required int modelPointer,
-  required LlamaRuntimeOptions options,
+  required BackendRuntimeOptions options,
 }) {
-  final libraryPath = options.libraryPath;
-  return LlamaCppRuntime(
-    modelPointer: modelPointer,
-    options: options,
-    // coverage:ignore-start
-    client: brainRuntimeClientOverride ?? LlamaClient(libraryPath: libraryPath),
-    bindings:
-        brainRuntimeBindingsOverride ??
-        LlamaClient.openBindings(libraryPath: libraryPath),
-    // coverage:ignore-end
-  );
+  switch (options) {
+    case LlamaCppRuntimeOptions():
+      final libraryPath = options.libraryPath;
+      return LlamaCppRuntime(
+        modelPointer: modelPointer,
+        options: options,
+        // coverage:ignore-start
+        client:
+            brainRuntimeClientOverride ?? LlamaClient(libraryPath: libraryPath),
+        bindings:
+            brainRuntimeBindingsOverride ??
+            LlamaClient.openBindings(libraryPath: libraryPath),
+        // coverage:ignore-end
+      );
+    case MlxRuntimeOptions():
+      final libraryPath = options.libraryPath;
+      return MlxRuntime(
+        modelId: modelPointer,
+        options: options,
+        // coverage:ignore-start
+        client:
+            brainMlxRuntimeClientOverride ??
+            MlxClient(libraryPath: libraryPath),
+        bindings:
+            brainMlxRuntimeBindingsOverride ??
+            MlxBindingsLoader.open(libraryPath: libraryPath),
+        // coverage:ignore-end
+      );
+  }
 }
 
 abstract interface class BrainRuntime {
@@ -81,8 +103,8 @@ void brainIsolateEntry(SendPort sendPort) {
 
 AgentBundle _createDefaultBundle({
   required int modelPointer,
-  required LlamaRuntimeOptions runtimeOptions,
-  required LlamaProfileId profile,
+  required BackendRuntimeOptions options,
+  required ModelProfileId profile,
   required ToolRegistry tools,
   required Conversation conversation,
   required int contextSize,
@@ -92,7 +114,7 @@ AgentBundle _createDefaultBundle({
 }) {
   final bundle = createAgent(
     modelPointer: modelPointer,
-    runtimeOptions: runtimeOptions,
+    options: options,
     profileId: profile,
     tools: tools,
     conversation: conversation,

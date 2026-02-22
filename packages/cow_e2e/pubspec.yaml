@@ -1,0 +1,17 @@
+name: cow_e2e
+description: End-to-end tests for cow backends.
+version: 0.1.0+1
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  cow:
+    path: ../cow
+  cow_brain:
+    path: ../cow_brain
+
+dev_dependencies:
+  test: ^1.26.3
+  very_good_analysis: ^10.0.0

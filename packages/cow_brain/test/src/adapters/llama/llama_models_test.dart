@@ -21,7 +21,7 @@ void main() {
         nThreadsBatch: 2,
         useFlashAttn: true,
       );
-      const sampling = LlamaSamplingOptions(
+      const sampling = SamplingOptions(
         seed: 42,
         topK: 10,
         topP: 0.9,

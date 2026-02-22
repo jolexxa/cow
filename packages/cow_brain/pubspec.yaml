@@ -13,6 +13,9 @@ dependencies:
     path: ../llama_cpp_dart
   logic_blocks:
     path: ../logic_blocks
+  meta: ^1.18.1
+  mlx_dart:
+    path: ../mlx_dart
   path: ^1.9.0
 
 dev_dependencies:

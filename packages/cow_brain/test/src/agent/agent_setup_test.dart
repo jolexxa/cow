@@ -4,10 +4,15 @@
 import 'dart:ffi';
 import 'dart:typed_data';
 
+import 'package:cow_brain/src/adapters/inference_adapter.dart';
 import 'package:cow_brain/src/adapters/llama/llama.dart';
+import 'package:cow_brain/src/adapters/model_profiles.dart';
+import 'package:cow_brain/src/adapters/qwen3_prompt_formatter.dart';
+import 'package:cow_brain/src/adapters/stream_chunk.dart';
 import 'package:cow_brain/src/agent/agent.dart';
 import 'package:cow_brain/src/context/context.dart';
 import 'package:cow_brain/src/core/core.dart';
+import 'package:cow_brain/src/isolate/brain_isolate.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:cow_brain/src/tools/tools.dart';
 import 'package:ffi/ffi.dart';
@@ -19,7 +24,7 @@ import '../../fixtures/fake_bindings.dart';
 void main() {
   group('createAgentWithLlama', () {
     test('wires tools into the prompt and runs a two-step tool turn', () async {
-      final runtime = ScriptedLlamaRuntime([
+      final runtime = ScriptedInferenceRuntime([
         '<tool_call>{"id":"1","name":"search","arguments":{"q":"cow"}}</tool_call>',
         'Done.',
       ]);
@@ -41,7 +46,7 @@ void main() {
         contextSize: 4096,
         maxOutputTokens: 256,
         temperature: 0.7,
-        profile: LlamaProfiles.qwen3,
+        profile: ModelProfiles.qwen3,
         safetyMarginTokens: 64,
       );
 
@@ -60,7 +65,7 @@ void main() {
     });
 
     test('uses provided tools and conversation', () {
-      final runtime = ScriptedLlamaRuntime(const []);
+      final runtime = ScriptedInferenceRuntime(const []);
       final tools = ToolRegistry();
       final convo = Conversation.initial();
 
@@ -71,7 +76,7 @@ void main() {
         contextSize: 64,
         maxOutputTokens: 16,
         temperature: 0.7,
-        profile: LlamaProfiles.qwen3,
+        profile: ModelProfiles.qwen3,
         safetyMarginTokens: 64,
       );
 
@@ -80,7 +85,7 @@ void main() {
     });
 
     test('accepts empty tools and a fresh conversation', () {
-      final runtime = ScriptedLlamaRuntime(const []);
+      final runtime = ScriptedInferenceRuntime(const []);
       final tools = ToolRegistry();
       final convo = Conversation.initial();
 
@@ -100,18 +105,21 @@ void main() {
       expect(
         () => createAgent(
           modelPointer: 1,
-          runtimeOptions: _runtimeOptions,
+          options: _runtimeOptions,
           contextSize: 256,
           maxOutputTokens: 64,
           temperature: 0.7,
-          profileId: LlamaProfileId.qwen3,
+          profileId: ModelProfileId.qwen3,
           tools: ToolRegistry(),
           conversation: Conversation.initial(),
           safetyMarginTokens: 64,
-          runtimeFactory: ({required int modelPointer, required options}) =>
-              LlamaCppRuntime(
+          runtimeFactory:
+              ({
+                required int modelPointer,
+                required BackendRuntimeOptions options,
+              }) => LlamaCppRuntime(
                 modelPointer: modelPointer,
-                options: options,
+                options: options as LlamaCppRuntimeOptions,
                 client: FakeLlamaClient(),
                 bindings: _NoopBindings(),
               ),
@@ -131,7 +139,7 @@ void main() {
 
       expect(bundle.tools, same(tools));
       expect(bundle.conversation, same(convo));
-      expect(bundle.runtime, isA<LlamaCppRuntime>());
+      expect(bundle.runtime, isA<BrainRuntime>());
     });
 
     test('creates a runtime via the provided factory', () {
@@ -139,25 +147,28 @@ void main() {
         tools: ToolRegistry(),
         conversation: Conversation.initial(),
       );
-      expect(bundle.runtime, isA<LlamaCppRuntime>());
+      expect(bundle.runtime, isA<BrainRuntime>());
     });
 
     test('auto profileId falls back to qwen3 when no template', () {
       final bindings = FakeLlamaBindings();
       final bundle = createAgent(
         modelPointer: 1,
-        runtimeOptions: _runtimeOptions,
-        profileId: LlamaProfileId.auto,
+        options: _runtimeOptions,
+        profileId: ModelProfileId.auto,
         tools: ToolRegistry(),
         conversation: Conversation.initial(),
         contextSize: 128,
         maxOutputTokens: 32,
         temperature: 0.7,
         safetyMarginTokens: 64,
-        runtimeFactory: ({required int modelPointer, required options}) =>
-            LlamaCppRuntime(
+        runtimeFactory:
+            ({
+              required int modelPointer,
+              required BackendRuntimeOptions options,
+            }) => LlamaCppRuntime(
               modelPointer: modelPointer,
-              options: options,
+              options: options as LlamaCppRuntimeOptions,
               client: FakeLlamaClient(bindings: bindings),
               bindings: bindings,
             ),
@@ -182,7 +193,7 @@ void main() {
 
       final profile = detectProfileFromRuntime(
         runtime,
-        fallback: LlamaProfiles.qwen3,
+        fallback: ModelProfiles.qwen3,
       );
       expect(profile.formatter, isA<Qwen3PromptFormatter>());
       runtime.dispose();
@@ -202,7 +213,7 @@ void main() {
 
       final profile = detectProfileFromRuntime(
         runtime,
-        fallback: LlamaProfiles.qwen25,
+        fallback: ModelProfiles.qwen25,
       );
       // Template contains <|im_start|> → detected as qwen3.
       expect(profile.formatter, isA<Qwen3PromptFormatter>());
@@ -211,7 +222,7 @@ void main() {
   });
 }
 
-const _runtimeOptions = LlamaRuntimeOptions(
+const _runtimeOptions = LlamaCppRuntimeOptions(
   modelPath: 'model',
   libraryPath: '/tmp/libllama.so',
   contextOptions: LlamaContextOptions(
@@ -225,12 +236,12 @@ const _runtimeOptions = LlamaRuntimeOptions(
 ({
   AgentLoop agent,
   Conversation conversation,
-  LlamaAdapter llm,
+  InferenceAdapter llm,
   ToolRegistry tools,
   ContextManager context,
 })
 _createAgentWithLlama({
-  required LlamaRuntime runtime,
+  required InferenceRuntime runtime,
   required ToolRegistry tools,
   required Conversation conversation,
   int contextSize = 64,
@@ -243,7 +254,7 @@ _createAgentWithLlama({
     contextSize: contextSize,
     maxOutputTokens: maxOutputTokens,
     temperature: 0.7,
-    profile: LlamaProfiles.qwen3,
+    profile: ModelProfiles.qwen3,
     safetyMarginTokens: 64,
   );
 }
@@ -251,21 +262,21 @@ _createAgentWithLlama({
 ({
   AgentLoop agent,
   Conversation conversation,
-  LlamaAdapter llm,
+  InferenceAdapter llm,
   ToolRegistry tools,
   ContextManager context,
-  LlamaCppRuntime runtime,
+  BrainRuntime runtime,
 })
 _createAgent({
   required ToolRegistry tools,
   required Conversation conversation,
   int contextSize = 128,
   int maxOutputTokens = 32,
-  LlamaProfileId profileId = LlamaProfileId.qwen3,
+  ModelProfileId profileId = ModelProfileId.qwen3,
 }) {
   return createAgent(
     modelPointer: 1,
-    runtimeOptions: _runtimeOptions,
+    options: _runtimeOptions,
     tools: tools,
     conversation: conversation,
     profileId: profileId,
@@ -273,18 +284,21 @@ _createAgent({
     maxOutputTokens: maxOutputTokens,
     temperature: 0.7,
     safetyMarginTokens: 64,
-    runtimeFactory: ({required int modelPointer, required options}) =>
-        LlamaCppRuntime(
+    runtimeFactory:
+        ({
+          required int modelPointer,
+          required BackendRuntimeOptions options,
+        }) => LlamaCppRuntime(
           modelPointer: modelPointer,
-          options: options,
+          options: options as LlamaCppRuntimeOptions,
           client: FakeLlamaClient(),
           bindings: _NoopBindings(),
         ),
   );
 }
 
-final class ScriptedLlamaRuntime implements LlamaRuntime {
-  ScriptedLlamaRuntime(this._outputs);
+final class ScriptedInferenceRuntime implements InferenceRuntime {
+  ScriptedInferenceRuntime(this._outputs);
 
   final List<String> _outputs;
   final List<String> prompts = <String>[];
@@ -297,7 +311,7 @@ final class ScriptedLlamaRuntime implements LlamaRuntime {
   }
 
   @override
-  Stream<LlamaStreamChunk> generate({
+  Stream<StreamChunk> generate({
     required String prompt,
     required List<String> stopSequences,
     required bool addBos,
@@ -311,7 +325,7 @@ final class ScriptedLlamaRuntime implements LlamaRuntime {
     }
     final output = _outputs[_index];
     _index += 1;
-    yield LlamaStreamChunk(text: output, tokenCountDelta: 0);
+    yield StreamChunk(text: output, tokenCountDelta: 0);
   }
 }
 

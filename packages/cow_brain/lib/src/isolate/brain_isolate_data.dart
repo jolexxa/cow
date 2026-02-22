@@ -14,13 +14,13 @@ final class BrainIsolateConfig {
     required this.agent,
     required this.conversation,
     required this.defaultSettings,
-    required this.runtimeOptions,
+    required this.options,
     required this.enableReasoningDefault,
   });
 
   final BrainRuntime runtime;
   final AgentSettings defaultSettings;
-  final LlamaRuntimeOptions runtimeOptions;
+  final BackendRuntimeOptions options;
   final bool enableReasoningDefault;
 
   // Mutable — agent settings change per-turn, conversation resets
