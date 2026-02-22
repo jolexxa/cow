@@ -45,7 +45,6 @@ class ChatPageView extends StatelessComponent {
           summaryLogic: summaryLogic,
           toolExecutor: toolExecutor,
           sessionLog: sessionLog,
-          primarySeed: appInfo.primarySeed,
         );
         unawaited(Future.microtask(chatCubit.initialize));
         return chatCubit;

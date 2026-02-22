@@ -174,14 +174,15 @@ class MacOS extends OSPlatform {
     );
   }
 
+  // Use MLX for the primary model on macOS whenever possible.
   @override
   String get defaultPrimaryModelId =>
       mlxLibraryPath != null ? AppModelId.qwen3Mlx.name : AppModelId.qwen3.name;
 
+  // Use llama.cpp (CPU) for the lightweight model on macOS so that the big
+  // model can use MLX (GPU) without hitching
   @override
-  String get defaultLightweightModelId => mlxLibraryPath != null
-      ? AppModelId.qwen25_3bMlx.name
-      : AppModelId.qwen25_3b.name;
+  String get defaultLightweightModelId => AppModelId.qwen25_3b.name;
 
   @override
   BackendRuntimeOptions buildRuntimeOptions({

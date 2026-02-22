@@ -31,10 +31,8 @@ class ChatCubit extends LogicBloc<ChatState> {
     required SummaryLogic summaryLogic,
     required ToolExecutor toolExecutor,
     required SessionLog sessionLog,
-    required int primarySeed,
   }) : _brains = brains,
        _sessionLog = sessionLog,
-       _primarySeed = primarySeed,
        _primaryBrain = primaryBrain,
        _summaryBrain = summaryBrain,
        _summaryLogic = summaryLogic,
@@ -108,7 +106,6 @@ class ChatCubit extends LogicBloc<ChatState> {
   final CowBrains<String> _brains;
   final CowBrain _primaryBrain;
   final SessionLog _sessionLog;
-  final int _primarySeed;
   final SummaryBrain _summaryBrain;
   final SummaryLogic _summaryLogic;
   final ToolExecutor _toolExecutor;
@@ -122,10 +119,7 @@ class ChatCubit extends LogicBloc<ChatState> {
   void initialize({List<ChatMessage> existingMessages = const []}) {
     input(
       Start(
-        existingMessages: [
-          ...existingMessages,
-          ChatMessage.alert('seed: $_primarySeed'),
-        ],
+        existingMessages: [...existingMessages],
       ),
     );
   }
