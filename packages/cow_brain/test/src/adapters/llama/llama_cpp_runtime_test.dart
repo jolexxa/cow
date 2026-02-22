@@ -787,6 +787,387 @@ void main() {
       },
     );
 
+    group('prefix caching', () {
+      test('reuses common prefix and only decodes new tokens', () async {
+        final bindings = FakeLlamaBindings()..vocabIsEogImpl = (_, _) => true;
+        final client = FakeClient(bindings)
+          ..tokenizeResult = [10, 20, 30]
+          ..sampleQueue.addAll([99, 99]);
+
+        final runtime = LlamaCppRuntime(
+          modelPointer: 1,
+          options: const LlamaCppRuntimeOptions(
+            modelPath: 'model',
+            libraryPath: '/tmp/libllama.so',
+            contextOptions: LlamaContextOptions(
+              contextSize: 64,
+              nBatch: 64,
+              nThreads: 1,
+              nThreadsBatch: 1,
+            ),
+            maxOutputTokensDefault: 4,
+          ),
+          client: client,
+          bindings: bindings,
+        );
+
+        // First generation: decodes all 3 prompt tokens.
+        await runtime
+            .generate(
+              prompt: 'first',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        // First call decoded [10, 20, 30] in one batch.
+        expect(client.decodedTokenLists.first, [10, 20, 30]);
+        client.decodedTokenLists.clear();
+        client.decodeCalls = 0;
+
+        // Second generation: prompt shares prefix [10, 20, 30], adds [40, 50].
+        client.tokenizeResult = [10, 20, 30, 40, 50];
+        await runtime
+            .generate(
+              prompt: 'second',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 1,
+            )
+            .toList();
+
+        // Should only decode the new suffix [40, 50], not the full prompt.
+        expect(client.decodedTokenLists.first, [40, 50]);
+      });
+
+      test('trims KV cache when prompt diverges from cached tokens', () async {
+        final bindings = FakeLlamaBindings()..vocabIsEogImpl = (_, _) => true;
+        final client = FakeClient(bindings)
+          ..tokenizeResult = [10, 20, 30]
+          ..sampleQueue.addAll([99, 99]);
+
+        final runtime = LlamaCppRuntime(
+          modelPointer: 1,
+          options: const LlamaCppRuntimeOptions(
+            modelPath: 'model',
+            libraryPath: '/tmp/libllama.so',
+            contextOptions: LlamaContextOptions(
+              contextSize: 64,
+              nBatch: 64,
+              nThreads: 1,
+              nThreadsBatch: 1,
+            ),
+            maxOutputTokensDefault: 4,
+          ),
+          client: client,
+          bindings: bindings,
+        );
+
+        await runtime
+            .generate(
+              prompt: 'first',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        // After gen1: cachedTokens = [10, 20, 30]
+        // posMax should reflect 2 (0-indexed positions for 3 tokens).
+        bindings
+          ..posMin = 0
+          ..posMax = 2
+          ..memoryRmHistory.clear();
+
+        // Second prompt diverges at index 1: [10, 77, 88].
+        client
+          ..tokenizeResult = [10, 77, 88]
+          ..decodedTokenLists.clear()
+          ..decodeCalls = 0;
+
+        await runtime
+            .generate(
+              prompt: 'diverged',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        // Should have trimmed from position 1 onward.
+        final trimCall = bindings.memoryRmHistory.first;
+        expect(trimCall.$2, 0); // seqId
+        expect(trimCall.$3, 1); // p0 = commonPrefixLen (diverges at index 1)
+        expect(trimCall.$4, 3); // p1 = posMax + 1
+
+        // Should only decode the diverged suffix [77, 88].
+        expect(client.decodedTokenLists.first, [77, 88]);
+      });
+
+      test('tracks generated tokens for prefix matching', () async {
+        final bindings = FakeLlamaBindings()
+          ..vocabIsEogImpl = (_, token) => token == 99;
+        final client = FakeClient(bindings)
+          ..tokenizeResult = [10, 20]
+          ..tokenBytes[50] = 'A'.codeUnits
+          ..tokenBytes[60] = 'B'.codeUnits
+          ..sampleQueue.addAll([50, 60, 99]);
+
+        final runtime = LlamaCppRuntime(
+          modelPointer: 1,
+          options: const LlamaCppRuntimeOptions(
+            modelPath: 'model',
+            libraryPath: '/tmp/libllama.so',
+            contextOptions: LlamaContextOptions(
+              contextSize: 64,
+              nBatch: 64,
+              nThreads: 1,
+              nThreadsBatch: 1,
+            ),
+            maxOutputTokensDefault: 10,
+          ),
+          client: client,
+          bindings: bindings,
+        );
+
+        // Gen1: prompt [10, 20], generates [50, 60].
+        // cachedTokens should be [10, 20, 50, 60] after.
+        await runtime
+            .generate(
+              prompt: 'first',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        // Gen2: prompt includes previous response [10, 20, 50, 60, 70].
+        // The full prefix [10, 20, 50, 60] should match cached tokens.
+        bindings
+          ..posMin = 0
+          ..posMax = 3; // 4 tokens in cache (positions 0-3)
+        client
+          ..tokenizeResult = [10, 20, 50, 60, 70]
+          ..decodedTokenLists.clear()
+          ..decodeCalls = 0
+          ..sampleQueue.addAll([99]);
+
+        await runtime
+            .generate(
+              prompt: 'second',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 1,
+            )
+            .toList();
+
+        // Only the new token [70] should be decoded.
+        expect(client.decodedTokenLists.first, [70]);
+      });
+
+      test('reset clears cached tokens and re-decodes full prompt', () async {
+        final bindings = FakeLlamaBindings()..vocabIsEogImpl = (_, _) => true;
+        final client = FakeClient(bindings)
+          ..tokenizeResult = [10, 20, 30]
+          ..sampleQueue.addAll([99, 99]);
+
+        final runtime = LlamaCppRuntime(
+          modelPointer: 1,
+          options: const LlamaCppRuntimeOptions(
+            modelPath: 'model',
+            libraryPath: '/tmp/libllama.so',
+            contextOptions: LlamaContextOptions(
+              contextSize: 64,
+              nBatch: 64,
+              nThreads: 1,
+              nThreadsBatch: 1,
+            ),
+            maxOutputTokensDefault: 4,
+          ),
+          client: client,
+          bindings: bindings,
+        );
+
+        // First generation.
+        await runtime
+            .generate(
+              prompt: 'first',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        client
+          ..decodedTokenLists.clear()
+          ..decodeCalls = 0;
+
+        // Second generation with reset — same tokens, but should re-decode all.
+        await runtime
+            .generate(
+              prompt: 'second',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: true,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        // Full prompt re-decoded despite matching tokens.
+        expect(client.decodedTokenLists.first, [10, 20, 30]);
+      });
+
+      test('skips decode when prompt exactly matches cached tokens', () async {
+        final bindings = FakeLlamaBindings()
+          ..vocabIsEogImpl = (_, token) => token == 99;
+        final client = FakeClient(bindings)
+          ..tokenizeResult = [10, 20, 30]
+          ..sampleQueue.addAll([99, 99]);
+
+        final runtime = LlamaCppRuntime(
+          modelPointer: 1,
+          options: const LlamaCppRuntimeOptions(
+            modelPath: 'model',
+            libraryPath: '/tmp/libllama.so',
+            contextOptions: LlamaContextOptions(
+              contextSize: 64,
+              nBatch: 64,
+              nThreads: 1,
+              nThreadsBatch: 1,
+            ),
+            maxOutputTokensDefault: 4,
+          ),
+          client: client,
+          bindings: bindings,
+        );
+
+        // First generation: decodes [10, 20, 30].
+        await runtime
+            .generate(
+              prompt: 'first',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        // Second generation: exact same prompt tokens. cachedTokens is
+        // [10, 20, 30] (no generated tokens since 99 is EOG).
+        // New prompt [10, 20, 30] fully matches — nothing to decode.
+        bindings
+          ..posMin = 0
+          ..posMax = 2; // 3 tokens in cache
+        client
+          ..decodedTokenLists.clear()
+          ..decodeCalls = 0;
+
+        await runtime
+            .generate(
+              prompt: 'same',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 1,
+            )
+            .toList();
+
+        // No prompt tokens decoded — only per-token sampling.
+        final promptDecodes = client.decodedTokenLists
+            .where((t) => t.length > 1)
+            .toList();
+        expect(promptDecodes, isEmpty);
+      });
+
+      test(
+        'front eviction partially trims cached tokens',
+        () async {
+          final bindings = FakeLlamaBindings()
+            ..vocabIsEogImpl = (_, _) => true;
+          final client = FakeClient(bindings)
+            ..tokenizeResult = [10, 20, 30, 40]
+            ..sampleQueue.addAll([99, 99]);
+
+          final runtime = LlamaCppRuntime(
+            modelPointer: 1,
+            options: const LlamaCppRuntimeOptions(
+              modelPath: 'model',
+              libraryPath: '/tmp/libllama.so',
+              contextOptions: LlamaContextOptions(
+                contextSize: 12,
+                nBatch: 64,
+                nThreads: 1,
+                nThreadsBatch: 1,
+              ),
+              maxOutputTokensDefault: 4,
+            ),
+            client: client,
+            bindings: bindings,
+          );
+
+          // Gen1: decode [10, 20, 30, 40]. cachedTokens = same.
+          await runtime
+              .generate(
+                prompt: 'first',
+                stopSequences: const [],
+                addBos: true,
+                requiresReset: false,
+                reusePrefixMessageCount: 0,
+              )
+              .toList();
+
+          // Simulate KV cache holding 4 tokens from gen1.
+          // New prompt shares prefix [10, 20, 30, 40] and adds
+          // [50, 60]. After prefix match, newTokens = [50, 60].
+          // _ensureRoomFor: 4 existing + 2 new + 4 output = 10
+          // but context is 12, so no eviction needed... we need
+          // to make it tight.
+          // Let's use contextSize=8: 4 + 2 + 4 = 10 > 8.
+          // Need to drop 2 from front.
+          // Actually we can't change contextSize after creation.
+          // Let's use a different setup.
+          // With contextSize=12, maxOutput=4:
+          // If posMin=0, posMax=7 (8 cached), newTokens=2:
+          // 8 + 2 + 4 = 14 > 12, drop 2 from front.
+          bindings
+            ..posMin = 0
+            ..posMax = 7; // 8 tokens in KV cache
+          client
+            ..tokenizeResult = [10, 20, 30, 40, 50, 60]
+            ..decodedTokenLists.clear()
+            ..decodeCalls = 0
+            ..sampleQueue.addAll([99]);
+
+          await runtime
+              .generate(
+                prompt: 'second',
+                stopSequences: const [],
+                addBos: true,
+                requiresReset: false,
+                reusePrefixMessageCount: 1,
+              )
+              .toList();
+
+          // Prefix match: [10,20,30,40] common → newTokens=[50,60]
+          // _ensureRoomFor: 8 existing + 2 new + 4 out = 14 > 12
+          // drops 2 from front → cachedTokens trimmed partially.
+          // Then decodes [50, 60].
+          expect(
+            client.decodedTokenLists.first,
+            [50, 60],
+          );
+        },
+      );
+    });
+
     test('final stop sequence check uses substring branch', () async {
       final bindings = FakeLlamaBindings()..vocabIsEogImpl = (_, _) => false;
       final client = FakeClient(bindings)
@@ -838,6 +1219,7 @@ final class FakeClient implements LlamaClientApi {
   int resetCalls = 0;
   int decodeCalls = 0;
   int disposeCalls = 0;
+  final List<List<int>> decodedTokenLists = [];
   Pointer<llama_context> createContextResult = Pointer.fromAddress(2);
   Pointer<llama_context> initialContext = Pointer.fromAddress(2);
 
@@ -889,6 +1271,7 @@ final class FakeClient implements LlamaClientApi {
     List<int> tokens,
   ) {
     decodeCalls += 1;
+    decodedTokenLists.add(List<int>.of(tokens));
   }
 
   @override
