@@ -700,6 +700,187 @@ void main() {
       expect(chunks, ['A']);
     });
   });
+
+  group('multi-sequence', () {
+    test('createSequence allocates a new context handle', () {
+      final bindings = FakeMlxBindings();
+      bindings.createContextResult = 20;
+      final client = _FakeMlxClient()..createContextResult = 20;
+      final runtime = _makeRuntime(client, bindings);
+
+      runtime.createSequence(1);
+
+      // 1 for constructor + 1 for createSequence.
+      expect(client.createContextCalls, 2);
+    });
+
+    test('createSequence throws when sequence already exists', () {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient();
+      final runtime = _makeRuntime(client, bindings);
+
+      // Sequence 0 is created in the constructor.
+      expect(
+        () => runtime.createSequence(0),
+        throwsStateError,
+      );
+    });
+
+    test('destroySequence frees context and removes it', () {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient()..createContextResult = 20;
+      final runtime = _makeRuntime(client, bindings);
+
+      runtime.createSequence(1);
+      runtime.destroySequence(1);
+
+      expect(bindings.freeContextCalls, 1);
+    });
+
+    test('destroySequence throws for unknown sequence', () {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient();
+      final runtime = _makeRuntime(client, bindings);
+
+      expect(
+        () => runtime.destroySequence(99),
+        throwsStateError,
+      );
+    });
+
+    test('forkSequence creates target and copies cache', () {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient()..createContextResult = 20;
+      final runtime = _makeRuntime(client, bindings);
+
+      runtime.forkSequence(source: 0, target: 1);
+
+      expect(bindings.forkContextCalls, 1);
+      // Constructor + fork target = 2 create calls.
+      expect(client.createContextCalls, 2);
+    });
+
+    test('forkSequence throws when source does not exist', () {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient();
+      final runtime = _makeRuntime(client, bindings);
+
+      expect(
+        () => runtime.forkSequence(source: 99, target: 1),
+        throwsStateError,
+      );
+    });
+
+    test('forkSequence throws when target already exists', () {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient();
+      final runtime = _makeRuntime(client, bindings);
+
+      expect(
+        () => runtime.forkSequence(source: 0, target: 0),
+        throwsStateError,
+      );
+    });
+
+    test('forkSequence cleans up on failure', () {
+      final bindings = FakeMlxBindings()..forkContextResult = false;
+      final client = _FakeMlxClient()..createContextResult = 20;
+      final runtime = _makeRuntime(client, bindings);
+
+      expect(
+        () => runtime.forkSequence(source: 0, target: 1),
+        throwsStateError,
+      );
+
+      // Should have freed the target context on failure.
+      expect(bindings.freeContextCalls, 1);
+    });
+
+    test('createBatchDecoder returns a decoder', () {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient();
+      final runtime = _makeRuntime(client, bindings);
+
+      final decoder = runtime.createBatchDecoder(maxTokens: 512);
+
+      expect(decoder, isNotNull);
+      expect(client.batchCreateCalls, 1);
+
+      decoder.dispose();
+    });
+
+    test('createBatchDecoder after dispose throws', () {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient();
+      final runtime = _makeRuntime(client, bindings);
+
+      runtime.dispose();
+
+      expect(
+        () => runtime.createBatchDecoder(maxTokens: 512),
+        throwsStateError,
+      );
+    });
+
+    test('generate on specific sequenceId uses that context', () async {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient()
+        ..createContextResult = 20
+        ..generateNextQueue.addAll([null, null]);
+      final runtime = _makeRuntime(client, bindings);
+
+      runtime.createSequence(1);
+
+      // Generate on sequence 1.
+      await runtime
+          .generate(
+            prompt: 'test',
+            stopSequences: const [],
+            addBos: true,
+            requiresReset: false,
+            reusePrefixMessageCount: 0,
+            sequenceId: 1,
+          )
+          .toList();
+
+      // generateBegin should have received the sequence 1 context handle.
+      expect(client.lastGenerateBeginContextHandle, 20);
+    });
+
+    test('generate on non-existent sequenceId throws', () {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient();
+      final runtime = _makeRuntime(client, bindings);
+
+      expect(
+        () => runtime
+            .generate(
+              prompt: 'test',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+              sequenceId: 99,
+            )
+            .toList(),
+        throwsStateError,
+      );
+    });
+
+    test('reset frees non-zero sequences and resets seq 0', () {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient()..createContextResult = 20;
+      final runtime = _makeRuntime(client, bindings);
+
+      runtime.createSequence(1);
+      runtime.reset();
+
+      // Should have freed sequence 1's context.
+      expect(bindings.freeContextCalls, 1);
+      // Should have reset sequence 0.
+      expect(client.resetContextCalls, 1);
+    });
+  });
 }
 
 final class _FakeMlxClient implements MlxClientApi {
@@ -772,4 +953,39 @@ final class _FakeMlxClient implements MlxClientApi {
     required String modelPath,
     MlxModelLoadProgressCallback? onProgress,
   }) => throw UnimplementedError();
+
+  // Batch stubs.
+  int batchCreateCalls = 0;
+  @override
+  int batchCreate(MlxHandles handles, int maxTokens) {
+    batchCreateCalls++;
+    return 1;
+  }
+
+  @override
+  void batchFree(MlxHandles handles, int batchHandle) {}
+  @override
+  void batchAddSequence(
+    MlxHandles handles,
+    int batchHandle,
+    int seqId,
+    List<int> tokens,
+  ) {}
+  @override
+  int batchPrefill(
+    MlxHandles handles,
+    int batchHandle,
+    SamplingOptions options,
+  ) => 0;
+  @override
+  Map<int, List<int>?> batchStep(
+    MlxHandles handles,
+    int batchHandle, {
+    int maxSeqs = 16,
+    int bufferSize = 4096,
+  }) => {};
+  @override
+  void batchRemoveSequence(MlxHandles handles, int batchHandle, int seqId) {}
+  @override
+  int batchActiveCount(MlxHandles handles, int batchHandle) => 0;
 }

@@ -7,6 +7,7 @@
 import 'dart:convert';
 
 import 'package:cow_brain/src/adapters/inference_adapter.dart';
+import 'package:cow_brain/src/adapters/mlx/mlx_batch_decoder.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_bindings.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_client.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_handles.dart';
@@ -204,6 +205,16 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
       _contextHandles.remove(target);
       throw StateError('forkContext failed: $error');
     }
+  }
+
+  /// Create a batch decoder for multi-sequence generation.
+  MlxBatchDecoder createBatchDecoder({required int maxTokens}) {
+    _ensureNotDisposed();
+    return MlxBatchDecoder(
+      client: _client,
+      handles: _handles,
+      maxTokens: maxTokens,
+    );
   }
 
   @override

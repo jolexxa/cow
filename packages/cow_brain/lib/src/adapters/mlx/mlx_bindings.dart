@@ -62,6 +62,36 @@ abstract class MlxBindings {
   int cacheTrimFront(int contextHandle, int n);
 
   bool forkContext(int srcContext, int dstContext);
+
+  // Batch generation.
+  int batchCreate(int modelHandle, int maxTokens);
+  void batchFree(int batchHandle);
+  bool batchAddSequence(
+    int batchHandle,
+    int seqId,
+    Pointer<Int32> tokens,
+    int tokenCount,
+  );
+  int batchPrefill(
+    int batchHandle,
+    double temperature,
+    double topP,
+    int topK,
+    double minP,
+    double repeatPenalty,
+    int repeatWindow,
+    int seed,
+  );
+  int batchStep(
+    int batchHandle,
+    Pointer<Utf8> outTokenBytes,
+    int outBufLen,
+    Pointer<Int32> outByteLens,
+    Pointer<Int32> outSeqIds,
+    int maxSeqs,
+  );
+  bool batchRemoveSequence(int batchHandle, int seqId);
+  int batchActiveCount(int batchHandle);
 }
 
 /// Concrete adapter delegating to [CowMlxBindings].
@@ -176,6 +206,67 @@ final class MlxBindingsAdapter implements MlxBindings {
   @override
   bool forkContext(int srcContext, int dstContext) =>
       _ffi.cow_mlx_fork_context(srcContext, dstContext);
+
+  @override
+  int batchCreate(int modelHandle, int maxTokens) =>
+      _ffi.cow_mlx_batch_create(modelHandle, maxTokens);
+
+  @override
+  void batchFree(int batchHandle) => _ffi.cow_mlx_batch_free(batchHandle);
+
+  @override
+  bool batchAddSequence(
+    int batchHandle,
+    int seqId,
+    Pointer<Int32> tokens,
+    int tokenCount,
+  ) => _ffi.cow_mlx_batch_add_sequence(batchHandle, seqId, tokens, tokenCount);
+
+  @override
+  int batchPrefill(
+    int batchHandle,
+    double temperature,
+    double topP,
+    int topK,
+    double minP,
+    double repeatPenalty,
+    int repeatWindow,
+    int seed,
+  ) => _ffi.cow_mlx_batch_prefill(
+    batchHandle,
+    temperature,
+    topP,
+    topK,
+    minP,
+    repeatPenalty,
+    repeatWindow,
+    seed,
+  );
+
+  @override
+  int batchStep(
+    int batchHandle,
+    Pointer<Utf8> outTokenBytes,
+    int outBufLen,
+    Pointer<Int32> outByteLens,
+    Pointer<Int32> outSeqIds,
+    int maxSeqs,
+  ) => _ffi.cow_mlx_batch_step(
+    batchHandle,
+    outTokenBytes.cast(),
+    outBufLen,
+    outByteLens,
+    outSeqIds,
+    maxSeqs,
+  );
+
+  @override
+  bool batchRemoveSequence(int batchHandle, int seqId) =>
+      _ffi.cow_mlx_batch_remove_sequence(batchHandle, seqId);
+
+  @override
+  int batchActiveCount(int batchHandle) =>
+      _ffi.cow_mlx_batch_active_count(batchHandle);
 }
 
 // coverage:ignore-end

@@ -581,6 +581,15 @@ void main() {
       expect(finalRemaining, initial - 5);
     });
 
+    test('exposes llm and tools for sequence forking', () {
+      final llm = FakeLlmAdapter([]);
+      final tools = ToolRegistry();
+      final loop = _buildLoop(llm: llm, tools: tools);
+
+      expect(loop.llm, same(llm));
+      expect(loop.tools, same(tools));
+    });
+
     test(
       'propagates non-stop finish reasons to step and turn events',
       () async {

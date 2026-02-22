@@ -492,3 +492,198 @@ public func cow_mlx_cache_trim_front(_ context: Int32, _ n: Int32) -> Int32 {
     }
     return Int32(ctx.trimCacheFront(Int(n)))
 }
+
+// MARK: - Batch Generation
+
+private let batches = HandleRegistry<CowMLXBatchContext>()
+
+@_cdecl("cow_mlx_batch_create")
+public func cow_mlx_batch_create(_ model: Int32, _ maxTokens: Int32) -> Int32 {
+    guard let m = models.get(model) else {
+        ErrorState.set("Invalid model handle")
+        return -1
+    }
+    let ctx = CowMLXBatchContext(model: m, maxTokens: maxTokens)
+    ErrorState.clear()
+    return batches.insert(ctx)
+}
+
+@_cdecl("cow_mlx_batch_free")
+public func cow_mlx_batch_free(_ batch: Int32) {
+    batches.remove(batch)
+}
+
+@_cdecl("cow_mlx_batch_add_sequence")
+public func cow_mlx_batch_add_sequence(
+    _ batch: Int32,
+    _ seqId: Int32,
+    _ tokens: UnsafePointer<Int32>?,
+    _ tokenCount: Int32
+) -> Bool {
+    guard let ctx = batches.get(batch) else {
+        ErrorState.set("Invalid batch handle")
+        return false
+    }
+    guard let tokens, tokenCount > 0 else {
+        ErrorState.set("tokens is NULL or empty")
+        return false
+    }
+
+    let tokenArray = (0 ..< Int(tokenCount)).map { Int(tokens[$0]) }
+    ctx.addSequence(id: seqId, tokens: tokenArray)
+    ErrorState.clear()
+    return true
+}
+
+@_cdecl("cow_mlx_batch_prefill")
+public func cow_mlx_batch_prefill(
+    _ batch: Int32,
+    _ temperature: Float,
+    _ topP: Float,
+    _ topK: Int32,
+    _ minP: Float,
+    _ repeatPenalty: Float,
+    _ repeatWindow: Int32,
+    _ seed: Int32
+) -> Int32 {
+    guard let ctx = batches.get(batch) else {
+        ErrorState.set("Invalid batch handle")
+        return -1
+    }
+
+    do {
+        try runBlocking {
+            try await ctx.model.container.perform { modelContext in
+                let sampler = CustomSampler(
+                    temperature: temperature,
+                    topP: topP,
+                    topK: Int(topK),
+                    minP: minP,
+                    seed: Int(seed)
+                )
+
+                var stopIds = modelContext.configuration.eosTokenIds
+                if let eosId = modelContext.tokenizer.eosTokenId {
+                    stopIds.insert(eosId)
+                }
+                for token in modelContext.configuration.extraEOSTokens {
+                    if let id = modelContext.tokenizer.convertTokenToId(token) {
+                        stopIds.insert(id)
+                    }
+                }
+
+                ctx.prefill(
+                    model: modelContext.model,
+                    tokenizer: modelContext.tokenizer,
+                    sampler: sampler,
+                    stopTokenIds: stopIds
+                )
+            }
+        }
+        ErrorState.clear()
+        return Int32(ctx.activeCount)
+    } catch {
+        ErrorState.set("batch_prefill failed: \(error)")
+        return -1
+    }
+}
+
+/// One decode step for all active sequences in the batch.
+///
+/// Returns the number of active sequences, or -1 on error.
+/// `outTokenBytes` receives all sequences' raw bytes contiguously.
+/// `outByteLens[i]` = byte count for sequence i.
+/// `outSeqIds[i]` = sequence ID for sequence i.
+/// A byte length of -1 means the sequence produced an EOG token.
+@_cdecl("cow_mlx_batch_step")
+public func cow_mlx_batch_step(
+    _ batch: Int32,
+    _ outTokenBytes: UnsafeMutablePointer<CChar>?,
+    _ outBufLen: Int32,
+    _ outByteLens: UnsafeMutablePointer<Int32>?,
+    _ outSeqIds: UnsafeMutablePointer<Int32>?,
+    _ maxSeqs: Int32
+) -> Int32 {
+    guard let ctx = batches.get(batch) else {
+        ErrorState.set("Invalid batch handle")
+        return -1
+    }
+
+    if ctx.activeCount == 0 {
+        ErrorState.clear()
+        return 0
+    }
+
+    // Wrap raw pointers for Sendable.
+    nonisolated(unsafe) let outBytesSafe = outTokenBytes
+    nonisolated(unsafe) let outLensSafe = outByteLens
+    nonisolated(unsafe) let outIdsSafe = outSeqIds
+
+    do {
+        let results: [(id: Int32, tokenId: Int, bytes: [UInt8])] = try runBlocking {
+            try await ctx.model.container.perform { modelContext in
+                ctx.step(languageModel: modelContext.model)
+            }
+        }
+
+        if results.isEmpty {
+            ErrorState.clear()
+            return 0
+        }
+
+        var byteOffset = 0
+        let count = min(results.count, Int(maxSeqs))
+
+        for i in 0 ..< count {
+            let (seqId, tokenId, bytes) = results[i]
+
+            outIdsSafe?[i] = seqId
+
+            if ctx.isEOG(tokenId) {
+                // Signal EOG with -1 byte length.
+                outLensSafe?[i] = -1
+                continue
+            }
+
+            let len = bytes.count
+            outLensSafe?[i] = Int32(len)
+
+            if let outBytesSafe, byteOffset + len <= Int(outBufLen) {
+                for j in 0 ..< len {
+                    outBytesSafe[byteOffset + j] = CChar(bitPattern: bytes[j])
+                }
+            }
+            byteOffset += len
+        }
+
+        ErrorState.clear()
+        return Int32(count)
+    } catch {
+        ErrorState.set("batch_step failed: \(error)")
+        return -1
+    }
+}
+
+@_cdecl("cow_mlx_batch_remove_sequence")
+public func cow_mlx_batch_remove_sequence(_ batch: Int32, _ seqId: Int32) -> Bool {
+    guard let ctx = batches.get(batch) else {
+        ErrorState.set("Invalid batch handle")
+        return false
+    }
+    let ok = ctx.removeSequence(id: seqId)
+    if !ok {
+        ErrorState.set("Sequence \(seqId) not found in batch")
+    } else {
+        ErrorState.clear()
+    }
+    return ok
+}
+
+@_cdecl("cow_mlx_batch_active_count")
+public func cow_mlx_batch_active_count(_ batch: Int32) -> Int32 {
+    guard let ctx = batches.get(batch) else {
+        ErrorState.set("Invalid batch handle")
+        return -1
+    }
+    return Int32(ctx.activeCount)
+}

@@ -467,6 +467,289 @@ void main() {
   });
 
   // -------------------------------------------------------------------------
+  // Batch: batchCreate
+  // -------------------------------------------------------------------------
+
+  group('batchCreate', () {
+    test('returns batch handle from bindings', () {
+      bindings.batchCreateResult = 42;
+
+      final client = _client();
+      final handles = _handles(bindings);
+
+      final h = client.batchCreate(handles, 512);
+
+      expect(h, 42);
+      expect(bindings.batchCreateCalls, 1);
+    });
+
+    test('throws StateError when batchCreate returns negative', () {
+      bindings
+        ..batchCreateResult = -1
+        ..getErrorResult = 'out of memory';
+
+      final client = _client();
+      final handles = _handles(bindings);
+
+      expect(
+        () => client.batchCreate(handles, 512),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('out of memory'),
+          ),
+        ),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Batch: batchFree
+  // -------------------------------------------------------------------------
+
+  group('batchFree', () {
+    test('delegates to bindings', () {
+      final client = _client();
+      final handles = _handles(bindings);
+
+      client.batchFree(handles, 7);
+
+      expect(bindings.batchFreeCalls, 1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Batch: batchAddSequence
+  // -------------------------------------------------------------------------
+
+  group('batchAddSequence', () {
+    test('passes tokens to bindings', () {
+      final client = _client();
+      final handles = _handles(bindings);
+
+      client.batchAddSequence(handles, 1, 0, [10, 20, 30]);
+
+      expect(bindings.batchAddSequenceCalls, 1);
+    });
+
+    test('throws StateError when bindings return false', () {
+      bindings
+        ..batchAddSequenceResult = false
+        ..getErrorResult = 'invalid seq';
+
+      final client = _client();
+      final handles = _handles(bindings);
+
+      expect(
+        () => client.batchAddSequence(handles, 1, 0, [10]),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('invalid seq'),
+          ),
+        ),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Batch: batchPrefill
+  // -------------------------------------------------------------------------
+
+  group('batchPrefill', () {
+    test('returns active count on success', () {
+      bindings.batchPrefillResult = 3;
+
+      final client = _client();
+      final handles = _handles(bindings);
+
+      final count = client.batchPrefill(
+        handles,
+        1,
+        const SamplingOptions(),
+      );
+
+      expect(count, 3);
+      expect(bindings.batchPrefillCalls, 1);
+    });
+
+    test('throws StateError when batchPrefill returns negative', () {
+      bindings
+        ..batchPrefillResult = -1
+        ..getErrorResult = 'prefill error';
+
+      final client = _client();
+      final handles = _handles(bindings);
+
+      expect(
+        () => client.batchPrefill(handles, 1, const SamplingOptions()),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('prefill error'),
+          ),
+        ),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Batch: batchStep
+  // -------------------------------------------------------------------------
+
+  group('batchStep', () {
+    test('returns per-sequence bytes on success', () {
+      bindings.batchStepImpl =
+          (
+            batchHandle,
+            outTokenBytes,
+            outBufLen,
+            outByteLens,
+            outSeqIds,
+            maxSeqs,
+          ) {
+            // Sequence 0: 2 bytes "Hi"
+            // Sequence 1: EOG (-1)
+            outSeqIds[0] = 0;
+            outByteLens[0] = 2;
+            final ptr = outTokenBytes.cast<Uint8>();
+            ptr[0] = 72; // H
+            ptr[1] = 105; // i
+
+            outSeqIds[1] = 1;
+            outByteLens[1] = -1; // EOG
+
+            return 2;
+          };
+
+      final client = _client();
+      final handles = _handles(bindings);
+
+      final result = client.batchStep(handles, 1);
+
+      expect(result[0], [72, 105]);
+      expect(result[1], isNull);
+    });
+
+    test('returns empty list for zero-length bytes', () {
+      bindings.batchStepImpl =
+          (
+            batchHandle,
+            outTokenBytes,
+            outBufLen,
+            outByteLens,
+            outSeqIds,
+            maxSeqs,
+          ) {
+            outSeqIds[0] = 5;
+            outByteLens[0] = 0;
+            return 1;
+          };
+
+      final client = _client();
+      final handles = _handles(bindings);
+
+      final result = client.batchStep(handles, 1);
+
+      expect(result[5], const <int>[]);
+    });
+
+    test('throws StateError when batchStep returns negative', () {
+      bindings
+        ..getErrorResult = 'step error'
+        ..batchStepImpl = (_, _, _, _, _, _) => -1;
+
+      final client = _client();
+      final handles = _handles(bindings);
+
+      expect(
+        () => client.batchStep(handles, 1),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('step error'),
+          ),
+        ),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Batch: batchRemoveSequence
+  // -------------------------------------------------------------------------
+
+  group('batchRemoveSequence', () {
+    test('delegates to bindings on success', () {
+      final client = _client();
+      final handles = _handles(bindings);
+
+      client.batchRemoveSequence(handles, 1, 42);
+
+      expect(bindings.batchRemoveSequenceCalls, 1);
+    });
+
+    test('throws StateError when bindings return false', () {
+      bindings
+        ..batchRemoveSequenceResult = false
+        ..getErrorResult = 'not found';
+
+      final client = _client();
+      final handles = _handles(bindings);
+
+      expect(
+        () => client.batchRemoveSequence(handles, 1, 42),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('not found'),
+          ),
+        ),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Batch: batchActiveCount
+  // -------------------------------------------------------------------------
+
+  group('batchActiveCount', () {
+    test('returns count from bindings', () {
+      bindings.batchActiveCountResult = 5;
+
+      final client = _client();
+      final handles = _handles(bindings);
+
+      expect(client.batchActiveCount(handles, 1), 5);
+      expect(bindings.batchActiveCountCalls, 1);
+    });
+
+    test('throws StateError when batchActiveCount returns negative', () {
+      bindings
+        ..batchActiveCountResult = -1
+        ..getErrorResult = 'bad handle';
+
+      final client = _client();
+      final handles = _handles(bindings);
+
+      expect(
+        () => client.batchActiveCount(handles, 1),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('bad handle'),
+          ),
+        ),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // dispose
   // -------------------------------------------------------------------------
 

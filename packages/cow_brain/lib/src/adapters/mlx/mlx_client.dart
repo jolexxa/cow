@@ -49,6 +49,33 @@ abstract class MlxClientApi {
   List<int>? generateNext(MlxHandles handles, {int bufferSize});
 
   void dispose(MlxHandles handles);
+
+  // Batch generation.
+  int batchCreate(MlxHandles handles, int maxTokens);
+  void batchFree(MlxHandles handles, int batchHandle);
+  void batchAddSequence(
+    MlxHandles handles,
+    int batchHandle,
+    int seqId,
+    List<int> tokens,
+  );
+  int batchPrefill(
+    MlxHandles handles,
+    int batchHandle,
+    SamplingOptions options,
+  );
+
+  /// One decode step for all active sequences.
+  /// Returns a map of seqId → raw token bytes.
+  /// A value of `null` for a seqId means it hit EOG.
+  Map<int, List<int>?> batchStep(
+    MlxHandles handles,
+    int batchHandle, {
+    int maxSeqs,
+    int bufferSize,
+  });
+  void batchRemoveSequence(MlxHandles handles, int batchHandle, int seqId);
+  int batchActiveCount(MlxHandles handles, int batchHandle);
 }
 
 final class MlxClient implements MlxClientApi {
@@ -256,5 +283,150 @@ final class MlxClient implements MlxClientApi {
       handles.contextHandle = -1;
     }
     b.freeModel(handles.modelHandle);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Batch generation
+  // ---------------------------------------------------------------------------
+
+  @override
+  int batchCreate(MlxHandles handles, int maxTokens) {
+    final b = handles.bindings;
+    final h = b.batchCreate(handles.modelHandle, maxTokens);
+    if (h < 0) {
+      final error = b.getError() ?? 'Unknown error';
+      throw StateError('Failed to create MLX batch: $error');
+    }
+    return h;
+  }
+
+  @override
+  void batchFree(MlxHandles handles, int batchHandle) {
+    handles.bindings.batchFree(batchHandle);
+  }
+
+  @override
+  void batchAddSequence(
+    MlxHandles handles,
+    int batchHandle,
+    int seqId,
+    List<int> tokens,
+  ) {
+    final b = handles.bindings;
+    final tokensPtr = calloc<Int32>(tokens.length);
+    for (var i = 0; i < tokens.length; i++) {
+      tokensPtr[i] = tokens[i];
+    }
+    final ok = b.batchAddSequence(batchHandle, seqId, tokensPtr, tokens.length);
+    calloc.free(tokensPtr);
+    if (!ok) {
+      final error = b.getError() ?? 'Unknown error';
+      throw StateError('batchAddSequence failed: $error');
+    }
+  }
+
+  @override
+  int batchPrefill(
+    MlxHandles handles,
+    int batchHandle,
+    SamplingOptions options,
+  ) {
+    final b = handles.bindings;
+    final result = b.batchPrefill(
+      batchHandle,
+      options.temperature ?? 0.7,
+      options.topP ?? 0.95,
+      options.topK ?? 40,
+      options.minP ?? 0.05,
+      options.penaltyRepeat ?? 1.1,
+      options.penaltyLastN ?? 64,
+      options.seed,
+    );
+    if (result < 0) {
+      final error = b.getError() ?? 'Unknown error';
+      throw StateError('batchPrefill failed: $error');
+    }
+    return result;
+  }
+
+  @override
+  Map<int, List<int>?> batchStep(
+    MlxHandles handles,
+    int batchHandle, {
+    int maxSeqs = 16,
+    int bufferSize = 4096,
+  }) {
+    final b = handles.bindings;
+    final outBuf = calloc<Uint8>(bufferSize);
+    final outByteLens = calloc<Int32>(maxSeqs);
+    final outSeqIds = calloc<Int32>(maxSeqs);
+
+    try {
+      final count = b.batchStep(
+        batchHandle,
+        outBuf.cast(),
+        bufferSize,
+        outByteLens,
+        outSeqIds,
+        maxSeqs,
+      );
+
+      if (count < 0) {
+        final error = b.getError() ?? 'Unknown error';
+        throw StateError('batchStep failed: $error');
+      }
+
+      final results = <int, List<int>?>{};
+      var byteOffset = 0;
+
+      for (var i = 0; i < count; i++) {
+        final seqId = outSeqIds[i];
+        final byteLen = outByteLens[i];
+
+        if (byteLen == -1) {
+          // EOG for this sequence.
+          results[seqId] = null;
+          continue;
+        }
+
+        if (byteLen == 0) {
+          results[seqId] = const <int>[];
+        } else {
+          results[seqId] = outBuf
+              .asTypedList(byteOffset + byteLen)
+              .sublist(byteOffset)
+              .toList(growable: false);
+        }
+        byteOffset += byteLen;
+      }
+
+      return results;
+    } finally {
+      calloc
+        ..free(outBuf)
+        ..free(outByteLens)
+        ..free(outSeqIds);
+    }
+  }
+
+  @override
+  void batchRemoveSequence(MlxHandles handles, int batchHandle, int seqId) {
+    final b = handles.bindings;
+    final ok = b.batchRemoveSequence(batchHandle, seqId);
+    if (!ok) {
+      final error = b.getError() ?? 'Unknown error';
+      throw StateError('batchRemoveSequence failed: $error');
+    }
+  }
+
+  @override
+  int batchActiveCount(MlxHandles handles, int batchHandle) {
+    final b = handles.bindings;
+    final count = b.batchActiveCount(batchHandle);
+    if (count < 0) {
+      final error = b.getError() ?? 'Unknown error';
+      throw StateError('batchActiveCount failed: $error');
+    }
+    return count;
   }
 }

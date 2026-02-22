@@ -118,6 +118,8 @@ void main() {
           ),
         )
         ..cancel(turnId: 'turn-1')
+        ..createSequence(sequenceId: 1, forkFrom: 0)
+        ..destroySequence(1)
         ..reset();
 
       await brain.dispose();

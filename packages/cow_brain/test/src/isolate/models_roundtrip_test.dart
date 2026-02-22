@@ -244,6 +244,47 @@ void main() {
         BrainRequest.fromJson(cancelRequest.toJson()).cancel?.turnId,
         'turn-1',
       );
+
+      final createSeq = CreateSequenceRequest(
+        sequenceId: int.parse('1'),
+        forkFrom: int.parse('0'),
+      );
+      final destroySeq = DestroySequenceRequest(
+        sequenceId: int.parse('2'),
+      );
+
+      final createDecoded = CreateSequenceRequest.fromJson(
+        createSeq.toJson(),
+      );
+      expect(createDecoded.sequenceId, 1);
+      expect(createDecoded.forkFrom, 0);
+
+      final destroyDecoded = DestroySequenceRequest.fromJson(
+        destroySeq.toJson(),
+      );
+      expect(destroyDecoded.sequenceId, 2);
+
+      final createSeqRequest = BrainRequest(
+        type: BrainRequestType.createSequence,
+        createSequence: createSeq,
+      );
+      final destroySeqRequest = BrainRequest(
+        type: BrainRequestType.destroySequence,
+        destroySequence: destroySeq,
+      );
+
+      expect(
+        BrainRequest.fromJson(
+          createSeqRequest.toJson(),
+        ).createSequence?.sequenceId,
+        1,
+      );
+      expect(
+        BrainRequest.fromJson(
+          destroySeqRequest.toJson(),
+        ).destroySequence?.sequenceId,
+        2,
+      );
     });
 
     test('agent events roundtrip', () {

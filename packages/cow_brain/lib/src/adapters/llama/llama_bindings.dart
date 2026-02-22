@@ -238,8 +238,7 @@ final class LlamaBindingsAdapter implements LlamaBindings {
       _bindings.llama_batch_init(nTokens, embd, nSeqMax);
 
   @override
-  void llama_batch_free(llama_batch batch) =>
-      _bindings.llama_batch_free(batch);
+  void llama_batch_free(llama_batch batch) => _bindings.llama_batch_free(batch);
 
   @override
   int llama_decode(Pointer<llama_context> ctx, llama_batch batch) =>

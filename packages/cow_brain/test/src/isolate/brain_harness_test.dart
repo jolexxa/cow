@@ -209,6 +209,58 @@ void main() {
       );
     });
 
+    test('createSequence/destroySequence require init', () {
+      final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
+      expect(
+        () => harness.createSequence(sequenceId: 1),
+        throwsStateError,
+      );
+      expect(
+        () => harness.destroySequence(1),
+        throwsStateError,
+      );
+    });
+
+    test('createSequence/destroySequence after dispose throw', () async {
+      final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
+      await harness.init(
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
+        tools: const <ToolDefinition>[],
+        settings: _settings(),
+        enableReasoning: true,
+      );
+      await harness.dispose();
+      expect(
+        () => harness.createSequence(sequenceId: 1),
+        throwsStateError,
+      );
+      expect(
+        () => harness.destroySequence(1),
+        throwsStateError,
+      );
+    });
+
+    test('createSequence and destroySequence send messages', () async {
+      final harness = BrainHarness(entrypoint: _fakeBrainIsolate);
+      await harness.init(
+        modelHandle: 1,
+        options: _runtimeOptions(),
+        profile: ModelProfileId.qwen3,
+        tools: const <ToolDefinition>[],
+        settings: _settings(),
+        enableReasoning: true,
+      );
+
+      // These just send messages — no response expected from the fake isolate.
+      harness
+        ..createSequence(sequenceId: 1, forkFrom: 0)
+        ..destroySequence(1);
+
+      await harness.dispose();
+    });
+
     test('runTurn refuses when a turn is active', () async {
       final harness = BrainHarness(entrypoint: _slowBrainIsolate);
       await harness.init(

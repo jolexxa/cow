@@ -45,11 +45,13 @@ class LlamaBatchDecoder {
     required int sequenceId,
   }) {
     final completer = Completer<BatchDecodeResult>();
-    _pending.add(_BatchSubmission(
-      token: token,
-      sequenceId: sequenceId,
-      completer: completer,
-    ));
+    _pending.add(
+      _BatchSubmission(
+        token: token,
+        sequenceId: sequenceId,
+        completer: completer,
+      ),
+    );
 
     if (!_dispatchScheduled) {
       _dispatchScheduled = true;

@@ -2,8 +2,12 @@ import 'dart:async';
 import 'dart:ffi';
 import 'dart:isolate';
 
+import 'package:cow_brain/src/adapters/inference_adapter.dart';
 import 'package:cow_brain/src/adapters/llama/llama.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx.dart';
+import 'package:cow_brain/src/adapters/prompt_formatter.dart';
+import 'package:cow_brain/src/adapters/stream_chunk.dart';
+import 'package:cow_brain/src/adapters/stream_parser.dart';
 import 'package:cow_brain/src/agent/agent.dart';
 import 'package:cow_brain/src/context/context.dart';
 import 'package:cow_brain/src/core/core.dart';
@@ -45,6 +49,136 @@ final class _FakeRuntime implements BrainRuntime {
   void dispose() {
     disposeCalls += 1;
   }
+}
+
+/// Runtime that also implements InferenceRuntime (for multi-sequence tests).
+final class _FakeInferenceRuntime implements BrainRuntime, InferenceRuntime {
+  int resetCalls = 0;
+  int disposeCalls = 0;
+  int createSequenceCalls = 0;
+  int destroySequenceCalls = 0;
+  int forkSequenceCalls = 0;
+  int? lastCreatedSeqId;
+  int? lastDestroyedSeqId;
+  ({int source, int target})? lastFork;
+  bool throwOnCreate = false;
+  bool throwOnFork = false;
+  bool throwOnDestroy = false;
+
+  /// Completer that delays generate until completed.
+  final Map<int, Completer<void>> generateGates = {};
+
+  @override
+  void reset() => resetCalls += 1;
+  @override
+  void dispose() => disposeCalls += 1;
+
+  @override
+  int countTokens(String prompt, {required bool addBos}) => prompt.length;
+
+  @override
+  Stream<StreamChunk> generate({
+    required String prompt,
+    required List<String> stopSequences,
+    required bool addBos,
+    required bool requiresReset,
+    required int reusePrefixMessageCount,
+    int sequenceId = 0,
+  }) {
+    final gate = generateGates[sequenceId];
+    if (gate != null) {
+      return _gatedStream(gate.future);
+    }
+    return const Stream.empty();
+  }
+
+  Stream<StreamChunk> _gatedStream(Future<void> gate) async* {
+    await gate;
+    // Stream completes after gate opens.
+  }
+
+  @override
+  void createSequence(int sequenceId) {
+    createSequenceCalls++;
+    lastCreatedSeqId = sequenceId;
+    if (throwOnCreate) throw StateError('create failed');
+  }
+
+  @override
+  void destroySequence(int sequenceId) {
+    destroySequenceCalls++;
+    lastDestroyedSeqId = sequenceId;
+    if (throwOnDestroy) throw StateError('destroy failed');
+  }
+
+  @override
+  void forkSequence({required int source, required int target}) {
+    forkSequenceCalls++;
+    lastFork = (source: source, target: target);
+    if (throwOnFork) throw StateError('fork failed');
+  }
+}
+
+final class _FakeFormatter implements PromptFormatter {
+  @override
+  String format({
+    required List<Message> messages,
+    required List<ToolDefinition> tools,
+    required bool systemApplied,
+    required bool enableReasoning,
+  }) => messages.map((m) => m.content).join('\n');
+
+  @override
+  List<String> get stopSequences => [];
+  @override
+  bool get addBos => false;
+}
+
+final class _FakeStreamParser implements StreamParser {
+  @override
+  Stream<ModelOutput> parse(Stream<StreamChunk> chunks) async* {
+    // Drain the input so errors propagate.
+    await for (final _ in chunks) {
+      // No output produced.
+    }
+  }
+}
+
+/// Creates a bundle with an [AgentLoop] backed by an [InferenceAdapter],
+/// which is required for multi-sequence tests (_createSequence needs
+/// the existing agent to be an AgentLoop with an InferenceAdapter).
+AgentBundle _agentLoopBundle({
+  required _FakeInferenceRuntime runtime,
+  required Conversation conversation,
+  required ToolRegistry tools,
+  int contextSize = 2048,
+  int maxOutputTokens = 512,
+}) {
+  final profile = ModelProfile(
+    formatter: _FakeFormatter(),
+    streamParser: _FakeStreamParser(),
+  );
+  final adapter = InferenceAdapter(runtime: runtime, profile: profile);
+  final contextManager = SlidingWindowContextManager(
+    counter: adapter.tokenCounter,
+    safetyMarginTokens: 64,
+  );
+  final agent = AgentLoop(
+    llm: adapter,
+    tools: tools,
+    context: contextManager,
+    contextSize: contextSize,
+    maxOutputTokens: maxOutputTokens,
+    temperature: 0.7,
+  );
+  return (
+    agent: agent,
+    conversation: conversation,
+    llm: adapter,
+    tools: tools,
+    context: contextManager,
+    runtime: runtime,
+  );
 }
 
 final class _FakeAgentRunner implements AgentRunner {
@@ -215,6 +349,35 @@ final class _FakeMlxClient implements MlxClientApi {
 
   @override
   void dispose(MlxHandles handles) {}
+
+  @override
+  int batchCreate(MlxHandles handles, int maxTokens) => 1;
+  @override
+  void batchFree(MlxHandles handles, int batchHandle) {}
+  @override
+  void batchAddSequence(
+    MlxHandles handles,
+    int batchHandle,
+    int seqId,
+    List<int> tokens,
+  ) {}
+  @override
+  int batchPrefill(
+    MlxHandles handles,
+    int batchHandle,
+    SamplingOptions options,
+  ) => 0;
+  @override
+  Map<int, List<int>?> batchStep(
+    MlxHandles handles,
+    int batchHandle, {
+    int maxSeqs = 16,
+    int bufferSize = 4096,
+  }) => {};
+  @override
+  void batchRemoveSequence(MlxHandles handles, int batchHandle, int seqId) {}
+  @override
+  int batchActiveCount(MlxHandles handles, int batchHandle) => 0;
 }
 
 final class _ThrowingAgentRunner implements AgentRunner {
@@ -1435,6 +1598,671 @@ void main() {
       );
 
       receivePort.close();
+    });
+
+    test('createSequence without payload emits error', () async {
+      final receivePort = ReceivePort();
+
+      BrainIsolateTestHarness(
+        receivePort.sendPort,
+        bundleFactory: _fakeBundleFactory,
+      ).handleMessage(
+        const BrainRequest(type: BrainRequestType.createSequence).toJson(),
+      );
+
+      final event = AgentEvent.fromJson(
+        Map<String, Object?>.from(await receivePort.first as Map),
+      );
+      expect(event, isA<AgentError>());
+      expect(
+        (event as AgentError).error,
+        contains('CreateSequence payload'),
+      );
+      receivePort.close();
+    });
+
+    test('destroySequence without payload emits error', () async {
+      final receivePort = ReceivePort();
+
+      BrainIsolateTestHarness(
+        receivePort.sendPort,
+        bundleFactory: _fakeBundleFactory,
+      ).handleMessage(
+        const BrainRequest(type: BrainRequestType.destroySequence).toJson(),
+      );
+
+      final event = AgentEvent.fromJson(
+        Map<String, Object?>.from(await receivePort.first as Map),
+      );
+      expect(event, isA<AgentError>());
+      expect(
+        (event as AgentError).error,
+        contains('DestroySequence payload'),
+      );
+      receivePort.close();
+    });
+
+    test('createSequence before init emits error', () async {
+      final receivePort = ReceivePort();
+
+      BrainIsolateTestHarness(
+        receivePort.sendPort,
+        bundleFactory: _fakeBundleFactory,
+      ).handleMessage(
+        const BrainRequest(
+          type: BrainRequestType.createSequence,
+          createSequence: CreateSequenceRequest(sequenceId: 1),
+        ).toJson(),
+      );
+
+      final event = AgentEvent.fromJson(
+        Map<String, Object?>.from(await receivePort.first as Map),
+      );
+      expect(event, isA<AgentError>());
+      expect((event as AgentError).error, contains('not initialized'));
+      receivePort.close();
+    });
+
+    test('destroySequence before init emits error', () async {
+      final receivePort = ReceivePort();
+
+      BrainIsolateTestHarness(
+        receivePort.sendPort,
+        bundleFactory: _fakeBundleFactory,
+      ).handleMessage(
+        const BrainRequest(
+          type: BrainRequestType.destroySequence,
+          destroySequence: DestroySequenceRequest(sequenceId: 1),
+        ).toJson(),
+      );
+
+      final event = AgentEvent.fromJson(
+        Map<String, Object?>.from(await receivePort.first as Map),
+      );
+      expect(event, isA<AgentError>());
+      expect((event as AgentError).error, contains('not initialized'));
+      receivePort.close();
+    });
+
+    group('multi-sequence', () {
+      late _FakeInferenceRuntime runtime;
+      late ReceivePort receivePort;
+      late StreamIterator<dynamic> iterator;
+      late BrainIsolateTestHarness harness;
+
+      setUp(() async {
+        runtime = _FakeInferenceRuntime();
+        receivePort = ReceivePort();
+        iterator = StreamIterator(receivePort);
+        harness =
+            BrainIsolateTestHarness(
+              receivePort.sendPort,
+              bundleFactory:
+                  ({
+                    required int modelPointer,
+                    required BackendRuntimeOptions options,
+                    required ModelProfileId profile,
+                    required ToolRegistry tools,
+                    required Conversation conversation,
+                    required int contextSize,
+                    required int maxOutputTokens,
+                    required double temperature,
+                    required int safetyMarginTokens,
+                  }) => _agentLoopBundle(
+                    runtime: runtime,
+                    conversation: conversation,
+                    tools: tools,
+                    contextSize: contextSize,
+                    maxOutputTokens: maxOutputTokens,
+                  ),
+            )..handleMessage(
+              BrainRequest(
+                type: BrainRequestType.init,
+                init: _initRequest(),
+              ).toJson(),
+            );
+        await iterator.moveNext(); // ready
+      });
+
+      tearDown(() async {
+        await iterator.cancel();
+        receivePort.close();
+      });
+
+      test('createSequence fresh creates new sequence', () {
+        harness.handleMessage(
+          const BrainRequest(
+            type: BrainRequestType.createSequence,
+            createSequence: CreateSequenceRequest(sequenceId: 1),
+          ).toJson(),
+        );
+
+        expect(runtime.createSequenceCalls, 1);
+        expect(runtime.lastCreatedSeqId, 1);
+      });
+
+      test('createSequence duplicate emits error', () async {
+        harness
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.createSequence,
+              createSequence: CreateSequenceRequest(sequenceId: 1),
+            ).toJson(),
+          )
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.createSequence,
+              createSequence: CreateSequenceRequest(sequenceId: 1),
+            ).toJson(),
+          );
+
+        await iterator.moveNext();
+        final event = AgentEvent.fromJson(
+          Map<String, Object?>.from(iterator.current as Map),
+        );
+        expect(event, isA<AgentError>());
+        expect((event as AgentError).error, contains('already exists'));
+      });
+
+      test('createSequence with fork copies from source', () {
+        harness.handleMessage(
+          const BrainRequest(
+            type: BrainRequestType.createSequence,
+            createSequence: CreateSequenceRequest(
+              sequenceId: 1,
+              forkFrom: 0,
+            ),
+          ).toJson(),
+        );
+
+        expect(runtime.forkSequenceCalls, 1);
+        expect(runtime.lastFork?.source, 0);
+        expect(runtime.lastFork?.target, 1);
+      });
+
+      test('createSequence fork from non-existent emits error', () async {
+        harness.handleMessage(
+          const BrainRequest(
+            type: BrainRequestType.createSequence,
+            createSequence: CreateSequenceRequest(
+              sequenceId: 1,
+              forkFrom: 99,
+            ),
+          ).toJson(),
+        );
+
+        await iterator.moveNext();
+        final event = AgentEvent.fromJson(
+          Map<String, Object?>.from(iterator.current as Map),
+        );
+        expect(event, isA<AgentError>());
+        expect((event as AgentError).error, contains('does not exist'));
+      });
+
+      test('createSequence with non-InferenceRuntime emits error', () async {
+        // Use a harness with a plain _FakeRuntime (not InferenceRuntime).
+        final plainPort = ReceivePort();
+        final plainIterator = StreamIterator(plainPort);
+        final plainHarness =
+            BrainIsolateTestHarness(
+              plainPort.sendPort,
+              bundleFactory: _fakeBundleFactory,
+            )..handleMessage(
+              BrainRequest(
+                type: BrainRequestType.init,
+                init: _initRequest(),
+              ).toJson(),
+            );
+        await plainIterator.moveNext(); // ready
+
+        plainHarness.handleMessage(
+          const BrainRequest(
+            type: BrainRequestType.createSequence,
+            createSequence: CreateSequenceRequest(sequenceId: 1),
+          ).toJson(),
+        );
+
+        await plainIterator.moveNext();
+        final event = AgentEvent.fromJson(
+          Map<String, Object?>.from(plainIterator.current as Map),
+        );
+        expect(event, isA<AgentError>());
+        expect(
+          (event as AgentError).error,
+          contains('does not support multi-sequence'),
+        );
+        await plainIterator.cancel();
+        plainPort.close();
+      });
+
+      test('createSequence runtime error emits error', () async {
+        runtime.throwOnCreate = true;
+
+        harness.handleMessage(
+          const BrainRequest(
+            type: BrainRequestType.createSequence,
+            createSequence: CreateSequenceRequest(sequenceId: 1),
+          ).toJson(),
+        );
+
+        await iterator.moveNext();
+        final event = AgentEvent.fromJson(
+          Map<String, Object?>.from(iterator.current as Map),
+        );
+        expect(event, isA<AgentError>());
+        expect((event as AgentError).error, contains('create failed'));
+      });
+
+      test('destroySequence removes sequence', () {
+        harness
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.createSequence,
+              createSequence: CreateSequenceRequest(sequenceId: 1),
+            ).toJson(),
+          )
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.destroySequence,
+              destroySequence: DestroySequenceRequest(sequenceId: 1),
+            ).toJson(),
+          );
+
+        expect(runtime.destroySequenceCalls, 1);
+        expect(runtime.lastDestroyedSeqId, 1);
+      });
+
+      test('destroySequence 0 emits error', () async {
+        harness.handleMessage(
+          const BrainRequest(
+            type: BrainRequestType.destroySequence,
+            destroySequence: DestroySequenceRequest(sequenceId: 0),
+          ).toJson(),
+        );
+
+        await iterator.moveNext();
+        final event = AgentEvent.fromJson(
+          Map<String, Object?>.from(iterator.current as Map),
+        );
+        expect(event, isA<AgentError>());
+        expect(
+          (event as AgentError).error,
+          contains('Cannot destroy sequence 0'),
+        );
+      });
+
+      test('destroySequence non-existent emits error', () async {
+        harness.handleMessage(
+          const BrainRequest(
+            type: BrainRequestType.destroySequence,
+            destroySequence: DestroySequenceRequest(sequenceId: 99),
+          ).toJson(),
+        );
+
+        await iterator.moveNext();
+        final event = AgentEvent.fromJson(
+          Map<String, Object?>.from(iterator.current as Map),
+        );
+        expect(event, isA<AgentError>());
+        expect((event as AgentError).error, contains('does not exist'));
+      });
+
+      test('destroySequence runtime error emits error', () async {
+        runtime.throwOnDestroy = true;
+
+        harness
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.createSequence,
+              createSequence: CreateSequenceRequest(sequenceId: 1),
+            ).toJson(),
+          )
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.destroySequence,
+              destroySequence: DestroySequenceRequest(sequenceId: 1),
+            ).toJson(),
+          );
+
+        await iterator.moveNext();
+        final event = AgentEvent.fromJson(
+          Map<String, Object?>.from(iterator.current as Map),
+        );
+        expect(event, isA<AgentError>());
+        expect((event as AgentError).error, contains('destroy failed'));
+      });
+
+      test('createSequence during active turn works', () async {
+        final turnPort = ReceivePort();
+        final turnIterator = StreamIterator(turnPort);
+        final turnHarness =
+            BrainIsolateTestHarness(
+              turnPort.sendPort,
+              bundleFactory:
+                  ({
+                    required int modelPointer,
+                    required BackendRuntimeOptions options,
+                    required ModelProfileId profile,
+                    required ToolRegistry tools,
+                    required Conversation conversation,
+                    required int contextSize,
+                    required int maxOutputTokens,
+                    required double temperature,
+                    required int safetyMarginTokens,
+                  }) => (
+                    agent: _FakeAgentRunner(
+                      contextSize: contextSize,
+                      maxOutputTokens: maxOutputTokens,
+                    ),
+                    conversation: conversation,
+                    llm: _FakeLlmAdapter(),
+                    tools: tools,
+                    context: _FakeContextManager(),
+                    runtime: _FakeInferenceRuntime(),
+                  ),
+            )..handleMessage(
+              BrainRequest(
+                type: BrainRequestType.init,
+                init: _initRequest(),
+              ).toJson(),
+            );
+        await turnIterator.moveNext(); // ready
+
+        // Start a turn to get into TurnActiveState, then create sequence.
+        turnHarness
+          ..handleMessage(
+            BrainRequest(
+              type: BrainRequestType.runTurn,
+              runTurn: _runTurnRequest(
+                userMessage: const Message(role: Role.user, content: 'hi'),
+              ),
+            ).toJson(),
+          )
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.createSequence,
+              createSequence: CreateSequenceRequest(sequenceId: 1),
+            ).toJson(),
+          );
+
+        // Destroy should fail because runtime is not InferenceRuntime,
+        // but createSequence output is fired (exercises TurnActiveState
+        // CreateSequenceInput handler).
+        await turnIterator.moveNext();
+        final event = AgentEvent.fromJson(
+          Map<String, Object?>.from(turnIterator.current as Map),
+        );
+        expect(event, isA<AgentError>());
+        expect(
+          (event as AgentError).error,
+          contains('Cannot create agent loop for sequence 1'),
+        );
+
+        await turnIterator.cancel();
+        turnPort.close();
+      });
+
+      test(
+        'destroySequence during active turn on that seq emits error',
+        () async {
+          final turnPort = ReceivePort();
+          final turnIterator = StreamIterator(turnPort);
+          final turnHarness =
+              BrainIsolateTestHarness(
+                turnPort.sendPort,
+                bundleFactory:
+                    ({
+                      required int modelPointer,
+                      required BackendRuntimeOptions options,
+                      required ModelProfileId profile,
+                      required ToolRegistry tools,
+                      required Conversation conversation,
+                      required int contextSize,
+                      required int maxOutputTokens,
+                      required double temperature,
+                      required int safetyMarginTokens,
+                    }) => _agentLoopBundle(
+                      runtime: _FakeInferenceRuntime(),
+                      conversation: conversation,
+                      tools: tools,
+                      contextSize: contextSize,
+                      maxOutputTokens: maxOutputTokens,
+                    ),
+              )..handleMessage(
+                BrainRequest(
+                  type: BrainRequestType.init,
+                  init: _initRequest(),
+                ).toJson(),
+              );
+          await turnIterator.moveNext(); // ready
+
+          // Start a turn on sequence 0 then try to destroy it.
+          turnHarness
+            ..handleMessage(
+              BrainRequest(
+                type: BrainRequestType.runTurn,
+                runTurn: _runTurnRequest(
+                  userMessage: const Message(role: Role.user, content: 'hi'),
+                ),
+              ).toJson(),
+            )
+            ..handleMessage(
+              const BrainRequest(
+                type: BrainRequestType.destroySequence,
+                destroySequence: DestroySequenceRequest(sequenceId: 0),
+              ).toJson(),
+            );
+
+          await turnIterator.moveNext();
+          final event = AgentEvent.fromJson(
+            Map<String, Object?>.from(turnIterator.current as Map),
+          );
+          expect(event, isA<AgentError>());
+          expect(
+            (event as AgentError).error,
+            contains('while turn is active'),
+          );
+
+          await turnIterator.cancel();
+          turnPort.close();
+        },
+      );
+
+      test('run_turn on non-existent sequence emits error', () async {
+        harness.handleMessage(
+          const BrainRequest(
+            type: BrainRequestType.runTurn,
+            runTurn: RunTurnRequest(
+              sequenceId: 99,
+              userMessage: Message(role: Role.user, content: 'hi'),
+              settings: _defaultSettings,
+              enableReasoning: true,
+            ),
+          ).toJson(),
+        );
+
+        await iterator.moveNext();
+        final event = AgentEvent.fromJson(
+          Map<String, Object?>.from(iterator.current as Map),
+        );
+        expect(event, isA<AgentError>());
+        expect(
+          (event as AgentError).error,
+          contains('does not exist'),
+        );
+      });
+
+      test('concurrent turns on different sequences', () async {
+        // Create sequence 1, then start turns on seq 0 and seq 1
+        // synchronously. First runTurn transitions Idle → TurnActive.
+        // Second runTurn hits TurnActiveState.RunTurnInput for seq 1
+        // (the concurrent turn path: lines 208-220).
+        harness
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.createSequence,
+              createSequence: CreateSequenceRequest(sequenceId: 1),
+            ).toJson(),
+          )
+          ..handleMessage(
+            BrainRequest(
+              type: BrainRequestType.runTurn,
+              runTurn: _runTurnRequest(
+                userMessage: const Message(role: Role.user, content: 'hi'),
+              ),
+            ).toJson(),
+          )
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.runTurn,
+              runTurn: RunTurnRequest(
+                sequenceId: 1,
+                userMessage: Message(role: Role.user, content: 'hey'),
+                settings: _defaultSettings,
+                enableReasoning: true,
+              ),
+            ).toJson(),
+          );
+
+        // Both turns complete asynchronously (Stream.empty from
+        // _FakeInferenceRuntime). The first TurnCompleted fires toSelf()
+        // (line 254) because the other sequence is still active. The second
+        // TurnCompleted transitions to IdleState.
+        // Drain all events emitted.
+        final events = <AgentEvent>[];
+        while (await iterator.moveNext()) {
+          final raw = iterator.current;
+          if (raw is! Map) continue;
+          final event = AgentEvent.fromJson(
+            Map<String, Object?>.from(raw),
+          );
+          events.add(event);
+          // Both turns should finish.
+          final finished = events.whereType<AgentTurnFinished>().length;
+          if (finished >= 2) break;
+        }
+
+        expect(
+          events.whereType<AgentTurnFinished>().length,
+          greaterThanOrEqualTo(2),
+        );
+      });
+
+      test('concurrent turn rejects non-user message', () async {
+        // Start turn on seq 0, create seq 1, then send a non-user message
+        // on seq 1 while in TurnActiveState.
+        harness
+          ..handleMessage(
+            BrainRequest(
+              type: BrainRequestType.runTurn,
+              runTurn: _runTurnRequest(
+                userMessage: const Message(role: Role.user, content: 'hi'),
+              ),
+            ).toJson(),
+          )
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.createSequence,
+              createSequence: CreateSequenceRequest(sequenceId: 1),
+            ).toJson(),
+          )
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.runTurn,
+              runTurn: RunTurnRequest(
+                sequenceId: 1,
+                userMessage: Message(role: Role.assistant, content: 'oops'),
+                settings: _defaultSettings,
+                enableReasoning: true,
+              ),
+            ).toJson(),
+          );
+
+        await iterator.moveNext();
+        final event = AgentEvent.fromJson(
+          Map<String, Object?>.from(iterator.current as Map),
+        );
+        expect(event, isA<AgentError>());
+        expect(
+          (event as AgentError).error,
+          contains('requires a user message'),
+        );
+      });
+
+      test('turnFailed with other sequences still active', () async {
+        // Start a turn on seq 0 (enters TurnActiveState), then start a
+        // turn on non-existent seq 99. The logic adds 99 to activeSequences
+        // and fires StreamTurnRequested(99). _streamTurn(99) finds no agent
+        // and fires TurnFailed(99) while seq 0 is still active — exercising
+        // the toSelf() branch (line 263).
+        final gate = Completer<void>();
+        runtime.generateGates[0] = gate;
+
+        harness
+          ..handleMessage(
+            BrainRequest(
+              type: BrainRequestType.runTurn,
+              runTurn: _runTurnRequest(
+                userMessage: const Message(role: Role.user, content: 'hi'),
+              ),
+            ).toJson(),
+          )
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.runTurn,
+              runTurn: RunTurnRequest(
+                sequenceId: 99,
+                userMessage: Message(role: Role.user, content: 'hey'),
+                settings: _defaultSettings,
+                enableReasoning: true,
+              ),
+            ).toJson(),
+          );
+
+        // Seq 99 fails immediately (no agent), emitting an error while
+        // seq 0 is still active.
+        await iterator.moveNext();
+        final event = AgentEvent.fromJson(
+          Map<String, Object?>.from(iterator.current as Map),
+        );
+        expect(event, isA<AgentError>());
+        expect(
+          (event as AgentError).error,
+          contains('does not exist'),
+        );
+
+        // Release gate so seq 0 completes and we can tear down cleanly.
+        gate.complete();
+      });
+
+      test('destroySequence on non-active seq during active turn', () async {
+        // Create seq 1, start turn on seq 0, then destroy seq 1 (not active).
+        harness
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.createSequence,
+              createSequence: CreateSequenceRequest(sequenceId: 1),
+            ).toJson(),
+          )
+          ..handleMessage(
+            BrainRequest(
+              type: BrainRequestType.runTurn,
+              runTurn: _runTurnRequest(
+                userMessage: const Message(role: Role.user, content: 'hi'),
+              ),
+            ).toJson(),
+          )
+          ..handleMessage(
+            const BrainRequest(
+              type: BrainRequestType.destroySequence,
+              destroySequence: DestroySequenceRequest(sequenceId: 1),
+            ).toJson(),
+          );
+
+        // Destroy should succeed (seq 1 not active).
+        expect(runtime.destroySequenceCalls, 1);
+        expect(runtime.lastDestroyedSeqId, 1);
+      });
     });
   });
 }

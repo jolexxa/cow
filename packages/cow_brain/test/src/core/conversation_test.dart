@@ -92,6 +92,27 @@ void main() {
       expect(() => conversation.appendToolResult(result), throwsArgumentError);
     });
 
+    test('copy creates an independent deep copy', () {
+      final original = Conversation.initial(systemPrompt: 'sys')
+        ..setSystemApplied(value: true)
+        ..addUser('hello')
+        ..beginTurn();
+
+      final copied = original.copy();
+
+      // Same messages.
+      expect(copied.messages.length, original.messages.length);
+      expect(copied.systemApplied, isTrue);
+
+      // Independent — mutating copy doesn't affect original.
+      copied.addUser('world');
+      expect(copied.messages.length, original.messages.length + 1);
+
+      // Turn counter is also independent.
+      expect(copied.beginTurn(), 'turn-2');
+      expect(original.beginTurn(), 'turn-2');
+    });
+
     test('appendToolResult appends a tool message when valid', () {
       final conversation = Conversation.initial().appendAssistantToolCalls(
         const [

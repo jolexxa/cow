@@ -422,7 +422,6 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
       );
     }
   }
-
 }
 
 String _drainDecodedChunks(List<String> decodedChunks) {
