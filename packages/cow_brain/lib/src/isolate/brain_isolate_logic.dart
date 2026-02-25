@@ -31,8 +31,8 @@ sealed class BrainIsolateState extends StateLogic<BrainIsolateState> {
       options: options,
       profile: request.profile,
       tools: tools,
-      conversation: Conversation.initial(),
-      contextSize: options.contextSize,
+      conversation: Conversation.initial(systemPrompt: request.systemPrompt),
+      contextSize: options.perSequenceContextSize,
       maxOutputTokens: options.maxOutputTokensDefault,
       temperature: options.samplingOptions.temperature ?? 0.7,
       safetyMarginTokens: request.settings.safetyMarginTokens,
@@ -45,6 +45,7 @@ sealed class BrainIsolateState extends StateLogic<BrainIsolateState> {
       defaultSettings: request.settings,
       options: options,
       enableReasoningDefault: request.enableReasoning,
+      systemPrompt: request.systemPrompt,
     );
   }
 }
@@ -147,7 +148,9 @@ final class IdleState extends BrainIsolateState {
 
       // Reset all conversations to just sequence 0.
       config.conversations.clear();
-      config.conversations[0] = Conversation.initial();
+      config.conversations[0] = Conversation.initial(
+        systemPrompt: config.systemPrompt,
+      );
       config.agents.removeWhere((k, _) => k != 0);
 
       output(const ResetRuntimeRequested());

@@ -51,6 +51,7 @@ class CowBrain {
     required List<ToolDefinition> tools,
     required AgentSettings settings,
     required bool enableReasoning,
+    required String systemPrompt,
   }) {
     if (options is LlamaCppRuntimeOptions) {
       _ensureBackendInitialized(options.libraryPath);
@@ -62,6 +63,7 @@ class CowBrain {
       tools: tools,
       settings: settings,
       enableReasoning: enableReasoning,
+      systemPrompt: systemPrompt,
     );
   }
 

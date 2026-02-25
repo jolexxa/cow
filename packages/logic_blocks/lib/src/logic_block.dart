@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:collections/collections.dart';
 import 'package:meta/meta.dart';
 
@@ -6,6 +8,23 @@ part 'logic_block_binding.dart';
 part 'logic_block_fake_binding.dart';
 part 'logic_block_listener.dart';
 part 'state_logic.dart';
+part 'future_tracker.dart';
+part 'stateful_future.dart';
+
+/// The lifecycle status of a logic block.
+///
+/// Logic blocks transition through these states:
+/// [stopped] → [started] → [stopped] → … → [disposed].
+enum LogicBlockStatus {
+  /// The logic block has not been started or has been stopped.
+  stopped,
+
+  /// The logic block is running and can receive inputs.
+  started,
+
+  /// The logic block has been disposed and can no longer be used.
+  disposed,
+}
 
 /// Represents a transition to a new state type.
 ///
@@ -87,12 +106,40 @@ abstract base class LogicBlock<TState extends StateLogic<TState>>
   @override
   final Blackboard blackboard = Blackboard();
 
-  /// The current state of the logic block. Accessing this before the logic
-  /// block has been started will trigger initialization.
-  TState get value => _value ?? _flush();
+  /// The current state of the logic block.
+  ///
+  /// Throws a [StateError] if the logic block has not been started.
+  TState get value {
+    if (_value == null) {
+      throw StateError(
+        'Cannot access value before the logic block has been started. '
+        'Call start() first.',
+      );
+    }
+    return _value!;
+  }
+
+  /// The lifecycle status of this logic block.
+  LogicBlockStatus get status => _status;
+
+  /// Whether the logic block is currently started and can receive inputs.
+  bool get isStarted => _status == LogicBlockStatus.started;
+
+  /// Whether the logic block is stopped (not yet started or explicitly
+  /// stopped).
+  bool get isStopped => _status == LogicBlockStatus.stopped;
+
+  /// Whether the logic block has been disposed.
+  bool get isDisposed => _status == LogicBlockStatus.disposed;
 
   /// Whether the logic block is currently processing inputs.
   bool get isProcessing => _busy > 0;
+
+  /// A [Future] that completes when all in-flight async operations started
+  /// via [StateLogic.async] have finished.
+  ///
+  /// Returns an already-completed future when no async work is pending.
+  Future<void> get task => _futureTracker.future;
 
   @override
   Object? get valueAsObject => _value;
@@ -100,8 +147,9 @@ abstract base class LogicBlock<TState extends StateLogic<TState>>
   late final Context _context;
   late final Set<LogicBlockListener<TState>> _listeners = {};
   late GenericQueue _inputs;
+  final FutureTracker _futureTracker = FutureTracker();
   int _busy = 0;
-  bool _started = false;
+  LogicBlockStatus _status = LogicBlockStatus.stopped;
   Object? _restoredState;
   TState? _value;
 
@@ -116,36 +164,57 @@ abstract base class LogicBlock<TState extends StateLogic<TState>>
 
   /// Starts the logic block by entering the initial state and returns it.
   ///
-  /// Has no effect if the logic block is already processing or has already
-  /// been started.
+  /// Throws a [StateError] if the logic block has been disposed.
+  /// Has no effect if already started.
   TState start() {
-    if (isProcessing || _value != null) {
+    _throwIfDisposed('start');
+
+    if (isStarted) {
       return _value!;
     }
 
-    return _flush();
+    _status = LogicBlockStatus.started;
+    return _initialize();
   }
 
   /// Stops the logic block, calling exit and detach callbacks on the current
   /// state before clearing the input queue.
   ///
-  /// Has no effect if the logic block is currently processing or has not been
-  /// started.
+  /// Throws a [StateError] if the logic block has been disposed.
+  /// Has no effect if not started or currently processing.
   void stop() {
-    if (isProcessing || _value == null) {
+    _throwIfDisposed('stop');
+
+    if (!isStarted || isProcessing) {
       return;
     }
 
-    // Repeatedly exit and detach the current state until there is none.
     _changeState(null);
 
     _inputs.clear();
 
-    // A state finally exited and detached without queuing additional inputs.
     _value = null;
-
-    _started = false;
+    _status = LogicBlockStatus.stopped;
     onStop();
+  }
+
+  /// Disposes the logic block, stopping it first if running, then cleaning
+  /// up all internal resources.
+  ///
+  /// Idempotent — calling dispose on an already-disposed logic block is a
+  /// no-op.
+  void dispose() {
+    if (isDisposed) return;
+
+    if (isStarted) {
+      stop();
+    }
+
+    _status = LogicBlockStatus.disposed;
+    _futureTracker.reset();
+    _inputs.clear();
+    _listeners.clear();
+    blackboard.clear();
   }
 
   /// Called after the logic block has been started for the first time.
@@ -162,8 +231,16 @@ abstract base class LogicBlock<TState extends StateLogic<TState>>
   /// detaching the current state.
   ///
   /// Throws a [StateError] if called while the logic block is processing
-  /// inputs.
+  /// inputs, or if the logic block is not started or has been disposed.
   TState forceReset(TState state) {
+    _throwIfDisposed('forceReset');
+
+    if (!isStarted) {
+      throw StateError(
+        'Cannot force reset a logic block that has not been started.',
+      );
+    }
+
     if (isProcessing) {
       throw StateError(
         'Cannot force reset a logic block while it is processing inputs. '
@@ -173,7 +250,7 @@ abstract base class LogicBlock<TState extends StateLogic<TState>>
 
     _changeState(state);
 
-    return _flush();
+    return _initialize();
   }
 
   /// Adds an [input] value to the logic block's internal input queue.
@@ -181,10 +258,22 @@ abstract base class LogicBlock<TState extends StateLogic<TState>>
   /// If the logic block is already processing, the input is enqueued and
   /// will be handled after the current input finishes. Returns the current
   /// state.
+  ///
+  /// Throws a [StateError] if the logic block has not been started or has
+  /// been disposed.
   TState input<TInput extends Object>(TInput input) {
+    _throwIfDisposed('input');
+
+    if (!isStarted) {
+      throw StateError(
+        'Cannot add input to a logic block that has not been started. '
+        'Call start() first.',
+      );
+    }
+
     if (isProcessing) {
       _inputs.enqueue(input);
-      return value;
+      return _value!;
     }
 
     return _processInputs<TInput>(input);
@@ -312,33 +401,17 @@ abstract base class LogicBlock<TState extends StateLogic<TState>>
     _restoredState = state as TState;
   }
 
-  TState _processInputs<TInput extends Object>([TInput? input]) {
+  TState _processInputs<TInput extends Object>(TInput input) {
     _busy++;
-
-    if (_value == null) {
-      // no state yet — let's get started
-      _changeState(
-        _restoredState as TState? ??
-            blackboard.getObject(_getInitialState()) as TState,
-      );
-      _restoredState = null;
-
-      if (!_started) {
-        _started = true;
-        onStart();
-      }
-    }
-
-    // process any first input
-    if (input != null) {
+    try {
       handleGenericQueueItem(_inputs, input);
-    }
 
-    while (_inputs.isNotEmpty) {
-      _inputs.dequeue();
+      while (_inputs.isNotEmpty) {
+        _inputs.dequeue();
+      }
+    } finally {
+      _busy--;
     }
-
-    _busy--;
 
     return _value!;
   }
@@ -349,12 +422,34 @@ abstract base class LogicBlock<TState extends StateLogic<TState>>
     return transition.stateType;
   }
 
-  TState _flush() {
-    if (_value == null) {
-      // Someday: restore blackboard if previously serialized
+  TState _initialize() {
+    _busy++;
+    try {
+      if (_value == null) {
+        _changeState(
+          _restoredState as TState? ??
+              blackboard.getObject(_getInitialState()) as TState,
+        );
+        _restoredState = null;
+        onStart();
+      }
+
+      while (_inputs.isNotEmpty) {
+        _inputs.dequeue();
+      }
+    } finally {
+      _busy--;
     }
 
-    return _processInputs<Object>();
+    return _value!;
+  }
+
+  void _throwIfDisposed(String method) {
+    if (isDisposed) {
+      throw StateError(
+        'Cannot call $method() on a disposed logic block.',
+      );
+    }
   }
 
   void _changeState(TState? state) {

@@ -52,7 +52,6 @@ void main() {
                 parameters: {'type': 'object'},
               ),
             ],
-            systemApplied: false,
             enableReasoning: true,
             config: config,
           )
@@ -90,7 +89,6 @@ void main() {
       final tokens = adapter.tokenCounter.countPromptTokens(
         messages: const [Message(role: Role.user, content: 'Hello')],
         tools: const [],
-        systemApplied: false,
       );
 
       expect(tokens, greaterThan(0));
@@ -119,7 +117,6 @@ void main() {
               Message(role: Role.user, content: 'Hello'),
             ],
             tools: const [],
-            systemApplied: false,
             enableReasoning: true,
             config: config,
           )

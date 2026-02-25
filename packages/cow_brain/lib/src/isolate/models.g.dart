@@ -253,6 +253,7 @@ InitRequest _$InitRequestFromJson(Map<String, dynamic> json) => InitRequest(
       .toList(),
   settings: AgentSettings.fromJson(json['settings'] as Map<String, dynamic>),
   enableReasoning: json['enableReasoning'] as bool,
+  systemPrompt: json['systemPrompt'] as String,
 );
 
 Map<String, dynamic> _$InitRequestToJson(InitRequest instance) =>
@@ -263,6 +264,7 @@ Map<String, dynamic> _$InitRequestToJson(InitRequest instance) =>
       'tools': instance.tools.map((e) => e.toJson()).toList(),
       'settings': instance.settings.toJson(),
       'enableReasoning': instance.enableReasoning,
+      'systemPrompt': instance.systemPrompt,
     };
 
 const _$ModelProfileIdEnumMap = {

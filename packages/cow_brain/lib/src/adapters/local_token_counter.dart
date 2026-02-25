@@ -26,13 +26,11 @@ final class LocalTokenCounter implements TokenCounter {
   int countPromptTokens({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
   }) {
     // Token estimation assumes reasoning is enabled for consistent sizing.
     final prompt = _formatter.format(
       messages: messages,
       tools: tools,
-      systemApplied: systemApplied,
       enableReasoning: true,
     );
     return _tokenCounter(prompt, addBos: _formatter.addBos);

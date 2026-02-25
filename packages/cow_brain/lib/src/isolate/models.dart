@@ -197,6 +197,7 @@ sealed class BackendRuntimeOptions {
   String get libraryPath;
   int get contextSize;
   int get maxSequences;
+  int get perSequenceContextSize => contextSize ~/ maxSequences;
   int get maxOutputTokensDefault;
   SamplingOptions get samplingOptions;
   Map<String, Object?> toJson();
@@ -367,6 +368,7 @@ class InitRequest {
     required this.tools,
     required this.settings,
     required this.enableReasoning,
+    required this.systemPrompt,
   });
   factory InitRequest.fromJson(Map<String, Object?> json) =>
       _$InitRequestFromJson(json);
@@ -384,6 +386,7 @@ class InitRequest {
   final List<ToolDefinition> tools;
   final AgentSettings settings;
   final bool enableReasoning;
+  final String systemPrompt;
   Map<String, Object?> toJson() => _$InitRequestToJson(this);
 }
 

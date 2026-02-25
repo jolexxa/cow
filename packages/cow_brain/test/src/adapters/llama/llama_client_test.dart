@@ -279,6 +279,7 @@ void main() {
             nThreads: 1,
             nThreadsBatch: 1,
           ),
+          maxSequences: 1,
         ),
         throwsStateError,
       );

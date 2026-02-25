@@ -5,8 +5,8 @@ import 'package:cow_brain/src/isolate/models.dart';
 import 'package:cow_brain/src/utils/deep_equals_extensions.dart';
 
 extension MessageListContextExtensions on List<Message> {
-  int pinnedPrefixCount({required bool systemApplied}) {
-    if (systemApplied || isEmpty) {
+  int get pinnedPrefixCount {
+    if (isEmpty) {
       return 0;
     }
     return first.role == Role.system ? 1 : 0;

@@ -14,6 +14,7 @@ final class BrainIsolateConfig {
     required this.defaultSettings,
     required this.options,
     required this.enableReasoningDefault,
+    required this.systemPrompt,
     required AgentRunner agent,
     required Conversation conversation,
   }) {
@@ -25,6 +26,7 @@ final class BrainIsolateConfig {
   final AgentSettings defaultSettings;
   final BackendRuntimeOptions options;
   final bool enableReasoningDefault;
+  final String systemPrompt;
 
   // Per-sequence state.
   final Map<int, AgentRunner> agents = {};

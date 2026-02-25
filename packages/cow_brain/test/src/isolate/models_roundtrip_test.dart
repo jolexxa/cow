@@ -160,6 +160,7 @@ void main() {
           maxSteps: int.parse('3'),
         ),
         enableReasoning: true,
+        systemPrompt: 'You are a test assistant.',
       );
 
       final initDecoded = InitRequest.fromJson(init.toJson());

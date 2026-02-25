@@ -14,9 +14,7 @@ import 'package:nocterm/nocterm.dart';
 Future<int> runCowApp(List<String> args, OSPlatform platform) async {
   final code = await runZonedGuarded(
     () async {
-      final appInfo = await AppInfo.initialize(
-        platform: platform,
-      );
+      final appInfo = await AppInfo.initialize(platform: platform);
 
       final sessionLog = SessionLog(appInfo.cowPaths.sessionLogFile)
         ..header(
@@ -39,7 +37,7 @@ Future<int> runCowApp(List<String> args, OSPlatform platform) async {
       return ExitCode.success.code;
     },
     (error, stack) {
-      stderr
+      stdout
         ..writeln('Unhandled error: $error')
         ..writeln(stack);
 
@@ -58,7 +56,7 @@ class CowApp extends StatelessComponent {
     final appInfo = AppInfo.of(context);
     if (appInfo.requiredProfilesPresent) {
       return const TuiTheme(
-        data: appThemeBarnyard,
+        data: appTheme,
         child: ChatPageView(),
       );
     }
@@ -72,7 +70,7 @@ class CowApp extends StatelessComponent {
         logic: StartupLogic(),
       ),
       child: const TuiTheme(
-        data: appThemeBarnyard,
+        data: appTheme,
         child: AppStartupView(),
       ),
     );

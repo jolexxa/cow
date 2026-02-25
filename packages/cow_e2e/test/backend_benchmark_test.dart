@@ -4,11 +4,8 @@
 // and measures TTFT, reasoning time, response time, and total per turn.
 //
 // To run:
-//   dart test test/benchmark_test.dart -r expanded
-//
-// Required env vars (see test.sh):
-//   COW_MLX_MODEL_PATH, COW_MLX_LIBRARY_PATH,
-//   COW_LLAMA_MODEL_PATH, COW_LLAMA_LIBRARY_PATH
+//   cd packages/cow_e2e
+//   dart test test/backend_benchmark_test.dart -r expanded
 
 @TestOn('mac-os')
 @Timeout(Duration(minutes: 20))
@@ -18,6 +15,8 @@ import 'dart:io';
 
 import 'package:cow_brain/cow_brain.dart';
 import 'package:test/test.dart';
+
+import 'helpers.dart';
 
 const _prompts = [
   'What is the Fibonacci sequence? Explain briefly.',
@@ -32,22 +31,13 @@ const _prompts = [
   'Summarize everything we discussed in 3 bullet points.',
 ];
 
-const _settings = AgentSettings(safetyMarginTokens: 64, maxSteps: 8);
-const _samplingOptions = SamplingOptions(seed: 42);
-
 void main() {
-  final mlxModelPath = Platform.environment['COW_MLX_MODEL_PATH'];
-  final mlxLibraryPath = Platform.environment['COW_MLX_LIBRARY_PATH'];
-  final llamaModelPath = Platform.environment['COW_LLAMA_MODEL_PATH'];
-  final llamaLibraryPath = Platform.environment['COW_LLAMA_LIBRARY_PATH'];
+  silenceNativeStderr();
+  final paths = TestPaths.resolve();
 
-  if (mlxModelPath == null ||
-      mlxLibraryPath == null ||
-      llamaModelPath == null ||
-      llamaLibraryPath == null) {
+  if (paths.llamaUnavailable || paths.mlxUnavailable) {
     stderr.writeln(
-      'Skipping benchmark: set COW_MLX_MODEL_PATH, COW_MLX_LIBRARY_PATH, '
-      'COW_LLAMA_MODEL_PATH, and COW_LLAMA_LIBRARY_PATH.',
+      'Skipping benchmark: both llama and MLX models/libraries required.',
     );
     return;
   }
@@ -60,20 +50,20 @@ void main() {
   setUp(() async {
     modelServer = await ModelServer.spawn();
     brains = CowBrains<String>(
-      libraryPath: mlxLibraryPath,
+      libraryPath: paths.mlxLibraryPath,
       modelServer: modelServer,
     );
 
     // Load both models.
     final mlxLoaded = await brains.loadModel(
-      modelPath: mlxModelPath,
+      modelPath: paths.mlxModelPath,
       backend: InferenceBackend.mlx,
-      libraryPathOverride: mlxLibraryPath,
+      libraryPathOverride: paths.mlxLibraryPath,
     );
     final llamaLoaded = await brains.loadModel(
-      modelPath: llamaModelPath,
+      modelPath: paths.llamaModelPath,
       modelOptions: const LlamaModelOptions(nGpuLayers: -1, useMmap: true),
-      libraryPathOverride: llamaLibraryPath,
+      libraryPathOverride: paths.llamaLibraryPath,
     );
 
     // MLX brain.
@@ -81,15 +71,16 @@ void main() {
     await mlxBrain.init(
       modelHandle: mlxLoaded.modelPointer,
       options: MlxRuntimeOptions(
-        modelPath: mlxModelPath,
-        libraryPath: mlxLibraryPath,
+        modelPath: paths.mlxModelPath,
+        libraryPath: paths.mlxLibraryPath,
         contextSize: 10000,
-        samplingOptions: _samplingOptions,
+        samplingOptions: defaultSamplingOptions,
       ),
       profile: ModelProfileId.qwen3,
       tools: const [],
-      settings: _settings,
+      settings: defaultSettings,
       enableReasoning: true,
+      systemPrompt: 'You are a helpful assistant.',
     );
 
     // llama.cpp brain.
@@ -97,8 +88,8 @@ void main() {
     await llamaBrain.init(
       modelHandle: llamaLoaded.modelPointer,
       options: LlamaCppRuntimeOptions(
-        modelPath: llamaModelPath,
-        libraryPath: llamaLibraryPath,
+        modelPath: paths.llamaModelPath,
+        libraryPath: paths.llamaLibraryPath,
         contextOptions: const LlamaContextOptions(
           contextSize: 10000,
           nBatch: 512,
@@ -110,12 +101,13 @@ void main() {
           nGpuLayers: -1,
           useMmap: true,
         ),
-        samplingOptions: _samplingOptions,
+        samplingOptions: defaultSamplingOptions,
       ),
       profile: ModelProfileId.qwen3,
       tools: const [],
-      settings: _settings,
+      settings: defaultSettings,
       enableReasoning: true,
+      systemPrompt: 'You are a helpful assistant.',
     );
   });
 
@@ -131,23 +123,19 @@ void main() {
       final prompt = _prompts[i];
       stdout
         ..writeln('\n--- Turn ${i + 1}: $prompt ---')
-        // MLX first.
         ..write('  MLX:   ');
       final mlx = await _runTimedTurn(mlxBrain, prompt);
       mlxMetrics.add(mlx);
       stdout
         ..writeln(mlx)
-        // llama.cpp second (sequential to avoid GPU contention).
         ..write('  llama: ');
       final llama = await _runTimedTurn(llamaBrain, prompt);
       llamaMetrics.add(llama);
       stdout.writeln(llama);
     }
 
-    // Print results table.
     _printResults(mlxMetrics, llamaMetrics);
 
-    // Just ensure both completed all 10 turns.
     expect(mlxMetrics, hasLength(_prompts.length));
     expect(llamaMetrics, hasLength(_prompts.length));
   });
@@ -167,7 +155,7 @@ Future<_TurnMetrics> _runTimedTurn(CowBrain brain, String prompt) async {
 
   await for (final event in brain.runTurn(
     userMessage: Message(role: Role.user, content: prompt),
-    settings: _settings,
+    settings: defaultSettings,
     enableReasoning: true,
   )) {
     if (!gotReasoning &&
@@ -206,30 +194,17 @@ class _TurnMetrics {
     required this.total,
   });
 
-  /// Time to first token (reasoning or text).
   final Duration ttft;
-
-  /// Timestamp when first text delta arrived (end of reasoning phase).
   final Duration reasoningEnd;
-
-  /// Total turn time.
   final Duration total;
 
-  /// Reasoning duration = reasoningEnd - ttft.
   Duration get reasoning => reasoningEnd - ttft;
-
-  /// Response duration = total - reasoningEnd.
   Duration get response => total - reasoningEnd;
 
   @override
   String toString() =>
-      'ttft=${_fmt(ttft)}  reasoning=${_fmt(reasoning)}  '
-      'response=${_fmt(response)}  total=${_fmt(total)}';
-}
-
-String _fmt(Duration d) {
-  final ms = d.inMilliseconds;
-  return '${(ms / 1000).toStringAsFixed(2)}s';
+      'ttft=${fmtDuration(ttft)}  reasoning=${fmtDuration(reasoning)}  '
+      'response=${fmtDuration(response)}  total=${fmtDuration(total)}';
 }
 
 // ---------------------------------------------------------------------------
@@ -274,8 +249,8 @@ void _printResults(List<_TurnMetrics> mlx, List<_TurnMetrics> llama) {
       stdout.writeln(
         '  ${(i + 1).toString().padLeft(3)} | '
         '${metric.padRight(11)} | '
-        '${_fmt(mVal).padLeft(7)} | '
-        '${_fmt(lVal).padLeft(7)} | '
+        '${fmtDuration(mVal).padLeft(7)} | '
+        '${fmtDuration(lVal).padLeft(7)} | '
         '$winner',
       );
     }

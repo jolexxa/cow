@@ -17,7 +17,6 @@ abstract interface class PromptFormatter {
   String format({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
     required bool enableReasoning,
   });
 

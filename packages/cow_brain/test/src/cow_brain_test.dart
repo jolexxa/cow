@@ -97,6 +97,7 @@ void main() {
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
+        systemPrompt: 'You are a test assistant.',
       );
 
       final events = await brain
@@ -199,6 +200,7 @@ void main() {
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
+        systemPrompt: 'You are a test assistant.',
       );
       await brainB.init(
         modelHandle: model.modelPointer,
@@ -207,6 +209,7 @@ void main() {
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
+        systemPrompt: 'You are a test assistant.',
       );
 
       await brains.remove('a');

@@ -37,6 +37,24 @@ abstract base class StateLogic<TState> {
   void on<TInput>(Func1Callback<TInput, Transition> handler) =>
       _internalState.on<TInput>(handler);
 
+  /// Register a fallback handler that is called for any input that does not
+  /// have a specific [on] handler registered. Specific handlers always take
+  /// priority over [onAny].
+  @protected
+  void onAny(Func1Callback<Object, Transition> handler) =>
+      _internalState.onAny(handler);
+
+  /// Wraps a [Future] so that its result is delivered as an input to the
+  /// logic block. Chain [StatefulFuture.input] and
+  /// [StatefulFuture.errorInput] to define which inputs to fire.
+  ///
+  /// The input will be delivered even if this state has been replaced by the
+  /// time the future completes. If the logic block has been stopped or
+  /// disposed, the input is silently discarded.
+  @protected
+  StatefulFuture<T> async<T>(Future<T> future) =>
+      StatefulFuture._(_internalState.contextAdapter, future);
+
   /// Gets a value of type [TData] from the logic block's blackboard.
   @protected
   TData get<TData extends Object>() => _internalState.get<TData>();
@@ -107,6 +125,7 @@ class _InternalState<TState>
   late final GenericList<ObjCallbackNullable> _enterHandlers;
   late final GenericList<ObjCallbackNullable> _exitHandlers;
   final Map<Type, Func1Callback<Object, Transition>> _inputHandlers = {};
+  Func1Callback<Object, Transition>? _anyInputHandler;
   _InternalStateOperation? _operation;
   TState? _previous;
   TState? _next;
@@ -124,6 +143,10 @@ class _InternalState<TState>
       );
     }
     _inputHandlers[TInput] = (input) => handler(input as TInput);
+  }
+
+  void onAny(Func1Callback<Object, Transition> handler) {
+    _anyInputHandler = handler;
   }
 
   TData get<TData extends Object>() => contextAdapter.get<TData>();
@@ -192,7 +215,7 @@ class _InternalState<TState>
   }
 
   Transition handleInput<TInput extends Object>(TState me, TInput input) {
-    final handler = _inputHandlers[TInput];
+    final handler = _inputHandlers[TInput] ?? _anyInputHandler;
 
     if (handler == null) {
       return toSelf(me);

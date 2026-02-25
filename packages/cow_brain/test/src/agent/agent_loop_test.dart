@@ -39,7 +39,6 @@ void main() {
       expect(finished.text, 'Hello');
       expect(convo.messages.last.role, Role.assistant);
       expect(convo.messages.last.content, 'Hello');
-      expect(convo.systemApplied, isTrue);
     });
 
     test(
@@ -110,65 +109,6 @@ void main() {
       },
     );
 
-    test(
-      'recomputes with systemApplied=false when a reset is required',
-      () async {
-        final llm = FakeLlmAdapter([
-          const [
-            OutputStepFinished(FinishReason.stop),
-          ],
-        ]);
-
-        final context = RecordingContextManager([
-          ContextSlice(
-            messages: const [Message(role: Role.system, content: 'System')],
-            estimatedPromptTokens: 10,
-            droppedMessageCount: 0,
-            contextSize: 512,
-            maxOutputTokens: 64,
-            safetyMarginTokens: 0,
-            budgetTokens: 448,
-            remainingTokens: 438,
-            reusePrefixMessageCount: 0,
-            requiresReset: true,
-          ),
-          ContextSlice(
-            messages: const [Message(role: Role.system, content: 'System')],
-            estimatedPromptTokens: 10,
-            droppedMessageCount: 0,
-            contextSize: 512,
-            maxOutputTokens: 64,
-            safetyMarginTokens: 0,
-            budgetTokens: 448,
-            remainingTokens: 438,
-            reusePrefixMessageCount: 0,
-            requiresReset: false,
-          ),
-        ]);
-
-        final loop = _buildLoop(
-          llm: llm,
-          context: context,
-          contextSize: 512,
-          maxOutputTokens: 64,
-        );
-
-        final convo = Conversation.initial(systemPrompt: 'System')
-          ..setSystemApplied(value: true)
-          ..addUser('Hi');
-
-        await loop.runTurn(convo).toList();
-
-        expect(context.calls, hasLength(2));
-        expect(context.calls.first.systemApplied, isTrue);
-        expect(context.calls.last.systemApplied, isFalse);
-        expect(context.calls.last.previousSlice, isNull);
-
-        final config = llm.receivedConfigs.single;
-        expect(config.requiresReset, isTrue);
-      },
-    );
-
     test('forces a reset when enableReasoning toggles between turns', () async {
       final llm = FakeLlmAdapter([
         const [
@@ -180,18 +120,6 @@ void main() {
       ]);
 
       final context = RecordingContextManager([
-        ContextSlice(
-          messages: const [Message(role: Role.system, content: 'System')],
-          estimatedPromptTokens: 10,
-          droppedMessageCount: 0,
-          contextSize: 512,
-          maxOutputTokens: 64,
-          safetyMarginTokens: 0,
-          budgetTokens: 448,
-          remainingTokens: 438,
-          reusePrefixMessageCount: 0,
-          requiresReset: false,
-        ),
         ContextSlice(
           messages: const [Message(role: Role.system, content: 'System')],
           estimatedPromptTokens: 10,
@@ -232,10 +160,8 @@ void main() {
       convo.addUser('Hi again');
       await loop.runTurn(convo, enableReasoning: false).toList();
 
-      expect(context.calls, hasLength(3));
-      expect(context.calls[1].systemApplied, isTrue);
-      expect(context.calls[2].systemApplied, isFalse);
-      expect(context.calls[2].previousSlice, isNull);
+      // Two prepare calls: one per turn (no systemApplied re-prepare).
+      expect(context.calls, hasLength(2));
 
       final secondConfig = llm.receivedConfigs[1];
       expect(secondConfig.requiresReset, isTrue);
@@ -581,13 +507,15 @@ void main() {
       expect(finalRemaining, initial - 5);
     });
 
-    test('exposes llm and tools for sequence forking', () {
+    test('exposes llm, tools, and contextManager for sequence forking', () {
       final llm = FakeLlmAdapter([]);
       final tools = ToolRegistry();
-      final loop = _buildLoop(llm: llm, tools: tools);
+      final context = PassthroughContextManager();
+      final loop = _buildLoop(llm: llm, tools: tools, context: context);
 
       expect(loop.llm, same(llm));
       expect(loop.tools, same(tools));
+      expect(loop.contextManager, same(context));
     });
 
     test(
@@ -759,19 +687,6 @@ void main() {
             reusePrefixMessageCount: 1,
             requiresReset: true,
           ),
-          // Second prepare call after systemApplied reset.
-          ContextSlice(
-            messages: const [Message(role: Role.user, content: 'Hi')],
-            estimatedPromptTokens: 10,
-            droppedMessageCount: 1,
-            contextSize: 512,
-            maxOutputTokens: 64,
-            safetyMarginTokens: 0,
-            budgetTokens: 448,
-            remainingTokens: 438,
-            reusePrefixMessageCount: 0,
-            requiresReset: false,
-          ),
         ]);
 
         final loop = _buildLoop(
@@ -780,13 +695,13 @@ void main() {
         );
 
         final convo = Conversation.initial(systemPrompt: 'System')
-          ..setSystemApplied(value: true)
           ..addUser('Hi');
         await loop.runTurn(convo).toList();
 
         final config = llm.receivedConfigs.single;
         expect(config.requiresReset, isTrue);
-        expect(config.reusePrefixMessageCount, 0);
+        // reusePrefixMessageCount is passed through from the context manager.
+        expect(config.reusePrefixMessageCount, 1);
       },
     );
 
@@ -892,7 +807,6 @@ final class FakeLlmAdapter implements LlmAdapter {
   Stream<ModelOutput> next({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
     required bool enableReasoning,
     required LlmConfig config,
   }) {
@@ -910,7 +824,6 @@ final class PassthroughContextManager implements ContextManager {
     required List<ToolDefinition> tools,
     required int contextSize,
     required int maxOutputTokens,
-    required bool systemApplied,
     ContextSlice? previousSlice,
   }) {
     return ContextSlice(
@@ -941,11 +854,10 @@ final class RecordingContextManager implements ContextManager {
     required List<ToolDefinition> tools,
     required int contextSize,
     required int maxOutputTokens,
-    required bool systemApplied,
     ContextSlice? previousSlice,
   }) {
     calls.add(
-      PrepareCall(systemApplied: systemApplied, previousSlice: previousSlice),
+      PrepareCall(previousSlice: previousSlice),
     );
     final slice = _slices[_index];
     _index += 1;
@@ -962,7 +874,6 @@ final class ErroringLlmAdapter implements LlmAdapter {
   Stream<ModelOutput> next({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
     required bool enableReasoning,
     required LlmConfig config,
   }) {
@@ -972,10 +883,8 @@ final class ErroringLlmAdapter implements LlmAdapter {
 
 final class PrepareCall {
   const PrepareCall({
-    required this.systemApplied,
     required this.previousSlice,
   });
 
-  final bool systemApplied;
   final ContextSlice? previousSlice;
 }

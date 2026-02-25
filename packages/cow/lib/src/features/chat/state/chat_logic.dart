@@ -102,6 +102,8 @@ final class InitializingState extends ChatState {
           InitializeBrainsRequested(
             models: Map.of(data.loadedModels),
             enableReasoning: data.enableReasoning,
+            systemPrompt: data.systemPrompt,
+            summarySystemPrompt: data.summarySystemPrompt,
           ),
         );
       }

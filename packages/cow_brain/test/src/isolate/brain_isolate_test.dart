@@ -124,7 +124,6 @@ final class _FakeFormatter implements PromptFormatter {
   String format({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
     required bool enableReasoning,
   }) => messages.map((m) => m.content).join('\n');
 
@@ -277,7 +276,6 @@ final class _FakeLlmAdapter implements LlmAdapter {
   Stream<ModelOutput> next({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
     required bool enableReasoning,
     required LlmConfig config,
   }) {
@@ -292,7 +290,6 @@ final class _FakeContextManager implements ContextManager {
     required List<ToolDefinition> tools,
     required int contextSize,
     required int maxOutputTokens,
-    required bool systemApplied,
     ContextSlice? previousSlice,
   }) {
     return ContextSlice(
@@ -892,6 +889,7 @@ void main() {
               tools: [],
               settings: _defaultSettings,
               enableReasoning: true,
+              systemPrompt: 'You are a test assistant.',
             ),
           ).toJson(),
         );
@@ -1229,8 +1227,9 @@ void main() {
       receivePort.close();
     });
 
-    test('reset clears pending state', () async {
+    test('reset allows new turn to run afterwards', () async {
       final receivePort = ReceivePort();
+      final iterator = StreamIterator(receivePort);
       final runtime = _FakeRuntime();
       final fakeAgent = _FakeAgentRunner(
         contextSize: 128,
@@ -1264,14 +1263,47 @@ void main() {
               init: _initRequest(),
             ).toJson(),
           );
-      await receivePort.first;
+      await iterator.moveNext(); // ready
 
       harness.handleMessage(
         const BrainRequest(type: BrainRequestType.reset).toJson(),
       );
-
-      // Reset clears runtime state.
       expect(runtime.resetCalls, 1);
+
+      // After reset, a new turn should succeed without errors.
+      harness.handleMessage(
+        BrainRequest(
+          type: BrainRequestType.runTurn,
+          runTurn: _runTurnRequest(
+            userMessage: const Message(role: Role.user, content: 'after reset'),
+          ),
+        ).toJson(),
+      );
+
+      fakeAgent.controller
+        ..add(const AgentStepStarted(turnId: 'turn-2', step: 1))
+        ..add(
+          const AgentTurnFinished(
+            turnId: 'turn-2',
+            step: 1,
+            finishReason: FinishReason.stop,
+          ),
+        );
+      await fakeAgent.controller.close();
+
+      final events = <AgentEvent>[];
+      for (var i = 0; i < 2; i += 1) {
+        await iterator.moveNext();
+        events.add(
+          AgentEvent.fromJson(
+            Map<String, Object?>.from(iterator.current as Map),
+          ),
+        );
+      }
+
+      expect(events.first, isA<AgentStepStarted>());
+      expect(events.last, isA<AgentTurnFinished>());
+      await iterator.cancel();
       receivePort.close();
     });
 
@@ -2304,6 +2336,7 @@ InitRequest _initRequest({
     tools: tools,
     settings: _defaultSettings,
     enableReasoning: true,
+    systemPrompt: 'You are a test assistant.',
   );
 }
 

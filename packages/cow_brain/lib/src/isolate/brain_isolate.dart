@@ -168,12 +168,6 @@ final class _BrainIsolate {
       ..onOutput<SendErrorRequested>((output) => _sendError(output.message))
       ..onOutput<StoreConfigRequested>((output) {
         _logic.blackboard.overwrite(output.config);
-        // Cache shared components for sequence creation.
-        final bundle = output.config;
-        if (bundle.agents[0] is AgentLoop) {
-          // Extract the LlmAdapter from the agent's first bundle.
-          // We need it for creating new agent loops.
-        }
       })
       ..onOutput<StreamTurnRequested>(
         (output) => unawaited(_streamTurn(output.sequenceId)),

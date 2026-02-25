@@ -1,9 +1,12 @@
 // Batch coordination for multi-sequence MLX GPU decoding.
 // ignore_for_file: public_member_api_docs
 
+import 'dart:async';
+
 import 'package:cow_brain/src/adapters/mlx/mlx_client.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_handles.dart';
 import 'package:cow_brain/src/isolate/models.dart';
+import 'package:meta/meta.dart';
 
 /// Coordinates batched decoding across multiple sequences using MLX.
 ///
@@ -60,4 +63,88 @@ class MlxBatchDecoder {
   void dispose() {
     _client.batchFree(_handles, _batchHandle);
   }
+}
+
+/// Coalescing layer on top of [MlxBatchDecoder].
+///
+/// Each sequence's generate loop calls [awaitStep] to wait for the next
+/// batched forward pass. Uses [Timer.run] to coalesce — all sequences that
+/// call [awaitStep] within the same event loop tick share one step call.
+class MlxBatchCoordinator {
+  MlxBatchCoordinator({required MlxBatchDecoder decoder}) : _decoder = decoder;
+
+  final MlxBatchDecoder _decoder;
+  final Map<int, Completer<List<int>?>> _waiting = {};
+  bool _dispatchScheduled = false;
+
+  /// The set of sequence IDs that have been added and prefilled.
+  final Set<int> _activeSeqs = {};
+
+  /// Add a sequence, prefill it, and mark it active.
+  void addAndPrefill(int seqId, List<int> tokens, SamplingOptions options) {
+    _decoder
+      ..addSequence(seqId, tokens)
+      ..prefill(options);
+    _activeSeqs.add(seqId);
+  }
+
+  /// Await the next batch decode step for [seqId].
+  ///
+  /// Returns raw token bytes, or `null` if the sequence hit EOG.
+  Future<List<int>?> awaitStep(int seqId) {
+    final completer = Completer<List<int>?>();
+    _waiting[seqId] = completer;
+
+    if (!_dispatchScheduled) {
+      _dispatchScheduled = true;
+      Timer.run(_dispatch);
+    }
+
+    return completer.future;
+  }
+
+  /// Remove a completed sequence from the batch. Idempotent.
+  void removeSequence(int seqId) {
+    if (_activeSeqs.remove(seqId)) {
+      _decoder.removeSequence(seqId);
+    }
+  }
+
+  /// Number of actively generating sequences.
+  int get activeCount => _activeSeqs.length;
+
+  void _dispatch() {
+    _dispatchScheduled = false;
+    if (_waiting.isEmpty) return;
+
+    final waiters = Map<int, Completer<List<int>?>>.of(_waiting);
+    _waiting.clear();
+
+    try {
+      final results = _decoder.step(maxSeqs: _activeSeqs.length);
+
+      for (final entry in waiters.entries) {
+        final seqId = entry.key;
+        final completer = entry.value;
+        final bytes = results[seqId];
+
+        if (bytes == null) {
+          // EOG — remove from batch.
+          _activeSeqs.remove(seqId);
+          _decoder.removeSequence(seqId);
+        }
+
+        completer.complete(bytes);
+      }
+    } catch (e, st) {
+      for (final completer in waiters.values) {
+        if (!completer.isCompleted) {
+          completer.completeError(e, st);
+        }
+      }
+    }
+  }
+
+  @visibleForTesting
+  void dispatchNow() => _dispatch();
 }

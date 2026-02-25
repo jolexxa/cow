@@ -3,6 +3,8 @@
 
 import 'dart:convert';
 
+import 'package:cow_brain/src/adapters/chunked_utf8.dart';
+import 'package:cow_brain/src/adapters/mlx/mlx_batch_decoder.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_client.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_handles.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_runtime.dart';
@@ -32,16 +34,15 @@ MlxRuntime _makeRuntime(
 
 void main() {
   group('MlxRuntime', () {
-    test('constructor creates handles and context', () {
-      final bindings = FakeMlxBindings(
-        modelFromIdResult: 5,
-      );
-      final client = _FakeMlxClient()..createContextResult = 10;
+    test('constructor creates handles and batch decoder', () {
+      final bindings = FakeMlxBindings(modelFromIdResult: 5);
+      final client = _FakeMlxClient();
 
-      _makeRuntime(client, bindings);
+      final runtime = _makeRuntime(client, bindings);
 
       expect(bindings.modelFromIdCalls, 1);
-      expect(client.createContextCalls, 1);
+      expect(client.batchCreateCalls, 1);
+      expect(runtime.batchDecoder, isA<MlxBatchDecoder>());
     });
 
     test('countTokens returns token count and passes addBos correctly', () {
@@ -79,14 +80,14 @@ void main() {
       );
     });
 
-    test('generate streams text chunks from generateNext queue', () async {
+    test('generate streams text chunks from batchStep', () async {
       final bindings = FakeMlxBindings();
       final client = _FakeMlxClient()
-        ..generateNextQueue.addAll([
-          utf8.encode('Hello'),
-          utf8.encode(', '),
-          utf8.encode('world'),
-          null,
+        ..batchStepQueue.addAll([
+          {0: utf8.encode('Hello')},
+          {0: utf8.encode(', ')},
+          {0: utf8.encode('world')},
+          {0: null},
         ]);
 
       final runtime = _makeRuntime(client, bindings);
@@ -108,10 +109,10 @@ void main() {
     test('generate stops on null (EOG)', () async {
       final bindings = FakeMlxBindings();
       final client = _FakeMlxClient()
-        ..generateNextQueue.addAll([
-          utf8.encode('tok1'),
-          null,
-          utf8.encode('tok2'),
+        ..batchStepQueue.addAll([
+          {0: utf8.encode('tok1')},
+          {0: null},
+          {0: utf8.encode('tok2')},
         ]);
 
       final runtime = _makeRuntime(client, bindings);
@@ -134,10 +135,10 @@ void main() {
     test('generate stops on stop sequence', () async {
       final bindings = FakeMlxBindings();
       final client = _FakeMlxClient()
-        ..generateNextQueue.addAll([
-          utf8.encode('Hi'),
-          utf8.encode('<|end|>'),
-          utf8.encode('more text'),
+        ..batchStepQueue.addAll([
+          {0: utf8.encode('Hi')},
+          {0: utf8.encode('<|end|>')},
+          {0: utf8.encode('more text')},
         ]);
 
       final runtime = _makeRuntime(client, bindings);
@@ -156,111 +157,13 @@ void main() {
       expect(text, 'Hi');
     });
 
-    test(
-      'generate with requiresReset recreates context and resets BOS',
-      () async {
-        final bindings = FakeMlxBindings();
-        final client = _FakeMlxClient()..generateNextQueue.add(null);
-
-        final runtime = _makeRuntime(client, bindings);
-
-        // First generate to set BOS applied.
-        await runtime
-            .generate(
-              prompt: 'first',
-              stopSequences: const [],
-              addBos: true,
-              requiresReset: false,
-              reusePrefixMessageCount: 0,
-            )
-            .toList();
-
-        client.generateNextQueue.add(null);
-        client.resetContextCalls = 0;
-        client.addSpecialCalls.clear();
-
-        // Second generate with reset.
-        await runtime
-            .generate(
-              prompt: 'second',
-              stopSequences: const [],
-              addBos: true,
-              requiresReset: true,
-              reusePrefixMessageCount: 0,
-            )
-            .toList();
-
-        // Reset now frees the old context and creates a new one.
-        expect(bindings.freeContextCalls, 1);
-        // Constructor created one context, reset created another.
-        expect(client.createContextCalls, 2);
-        // After reset, BOS should be false again so next tokenize gets
-        // addSpecial=true.
-        expect(client.addSpecialCalls.last, isTrue);
-      },
-    );
-
-    test('generate after reset uses the new context handle', () async {
-      final bindings = FakeMlxBindings();
-      var nextCtx = 100;
-      final client = _FakeMlxClient()
-        ..createContextResult = nextCtx
-        ..generateNextQueue.add(null);
-
-      final runtime = _makeRuntime(client, bindings);
-
-      // First generate — normal.
-      await runtime
-          .generate(
-            prompt: 'first',
-            stopSequences: const [],
-            addBos: true,
-            requiresReset: false,
-            reusePrefixMessageCount: 0,
-          )
-          .toList();
-
-      // Reset creates a new context handle.
-      nextCtx = 200;
-      client
-        ..createContextResult = nextCtx
-        ..generateNextQueue.add(null);
-
-      await runtime
-          .generate(
-            prompt: 'second',
-            stopSequences: const [],
-            addBos: true,
-            requiresReset: true,
-            reusePrefixMessageCount: 0,
-          )
-          .toList();
-
-      // Third generate WITHOUT reset — must use the handle from reset,
-      // not the stale original.
-      client.generateNextQueue.add(null);
-
-      await runtime
-          .generate(
-            prompt: 'third',
-            stopSequences: const [],
-            addBos: true,
-            requiresReset: false,
-            reusePrefixMessageCount: 0,
-          )
-          .toList();
-
-      // generateBegin should have received the new context handle (200),
-      // not the original. We verify via the handle stored on the handles
-      // object at the time of the last generateBegin call.
-      expect(client.lastGenerateBeginContextHandle, nextCtx);
-    });
-
     test('generate flushes remaining text when stream ends', () async {
       final bindings = FakeMlxBindings();
-      // Use a stop sequence long enough that text won't flush until end.
       final client = _FakeMlxClient()
-        ..generateNextQueue.addAll([utf8.encode('partial'), null]);
+        ..batchStepQueue.addAll([
+          {0: utf8.encode('partial')},
+          {0: null},
+        ]);
 
       final runtime = _makeRuntime(client, bindings);
 
@@ -278,69 +181,16 @@ void main() {
       expect(text, 'partial');
     });
 
-    test(
-      'generate always tokenizes with addSpecial for cache alignment',
-      () async {
-        final bindings = FakeMlxBindings();
-        final client = _FakeMlxClient()..generateNextQueue.add(null);
-
-        final runtime = _makeRuntime(client, bindings);
-
-        // First generate with addBos=true.
-        await runtime
-            .generate(
-              prompt: 'first',
-              stopSequences: const [],
-              addBos: true,
-              requiresReset: false,
-              reusePrefixMessageCount: 0,
-            )
-            .toList();
-
-        client.generateNextQueue.add(null);
-
-        // Second generate — still addSpecial=true so token positions
-        // align with the KV cache (which starts with BOS from gen 1).
-        await runtime
-            .generate(
-              prompt: 'second',
-              stopSequences: const [],
-              addBos: true,
-              requiresReset: false,
-              reusePrefixMessageCount: 0,
-            )
-            .toList();
-
-        expect(client.addSpecialCalls, [true, true]);
-      },
-    );
-
-    test(
-      'dispose frees context via bindings and second dispose is a no-op',
-      () {
-        final bindings = FakeMlxBindings();
-        final client = _FakeMlxClient()..createContextResult = 10;
-
-        final runtime = _makeRuntime(client, bindings);
-
-        runtime.dispose();
-
-        expect(bindings.freeContextCalls, 1);
-        expect(bindings.lastFreeContextHandle, 10);
-
-        // Second dispose — no-op, no extra freeContext calls.
-        runtime.dispose();
-        expect(bindings.freeContextCalls, 1);
-      },
-    );
-
-    test('reset delegates to client and resets BOS state', () async {
+    test('generate always tokenizes with addSpecial', () async {
       final bindings = FakeMlxBindings();
-      final client = _FakeMlxClient()..generateNextQueue.add(null);
+      final client = _FakeMlxClient()
+        ..batchStepQueue.addAll([
+          {0: null},
+          {0: null},
+        ]);
 
       final runtime = _makeRuntime(client, bindings);
 
-      // Apply BOS by generating.
       await runtime
           .generate(
             prompt: 'first',
@@ -351,16 +201,58 @@ void main() {
           )
           .toList();
 
-      client.addSpecialCalls.clear();
+      await runtime
+          .generate(
+            prompt: 'second',
+            stopSequences: const [],
+            addBos: true,
+            requiresReset: false,
+            reusePrefixMessageCount: 0,
+          )
+          .toList();
+
+      expect(client.addSpecialCalls, [true, true]);
+    });
+
+    test(
+      'dispose frees batch decoder and second dispose is a no-op',
+      () {
+        final bindings = FakeMlxBindings();
+        final client = _FakeMlxClient();
+
+        final runtime = _makeRuntime(client, bindings);
+
+        runtime.dispose();
+
+        expect(client.batchFreeCalls, 1);
+
+        // Second dispose — no-op.
+        runtime.dispose();
+        expect(client.batchFreeCalls, 1);
+      },
+    );
+
+    test('reset recreates batch decoder and coordinator', () async {
+      final bindings = FakeMlxBindings();
+      final client = _FakeMlxClient()..batchStepQueue.add({0: null});
+
+      final runtime = _makeRuntime(client, bindings);
+
+      await runtime
+          .generate(
+            prompt: 'first',
+            stopSequences: const [],
+            addBos: true,
+            requiresReset: false,
+            reusePrefixMessageCount: 0,
+          )
+          .toList();
 
       runtime.reset();
 
-      expect(client.resetContextCalls, 1);
-
-      // After reset, BOS state cleared — next countTokens with addBos=true
-      // should pass addSpecial=true again.
-      runtime.countTokens('check', addBos: true);
-      expect(client.addSpecialCalls.last, isTrue);
+      // Old decoder freed, new one created.
+      expect(client.batchFreeCalls, 1);
+      expect(client.batchCreateCalls, 2);
     });
 
     test('reset after dispose throws StateError', () {
@@ -394,13 +286,13 @@ void main() {
       );
     });
 
-    test('generate handles empty bytes from generateNext', () async {
+    test('generate handles empty bytes from batchStep', () async {
       final bindings = FakeMlxBindings();
       final client = _FakeMlxClient()
-        ..generateNextQueue.addAll([
-          [], // empty bytes — hits bytes.isEmpty branch
-          utf8.encode('ok'),
-          null,
+        ..batchStepQueue.addAll([
+          {0: <int>[]},
+          {0: utf8.encode('ok')},
+          {0: null},
         ]);
 
       final runtime = _makeRuntime(client, bindings);
@@ -423,12 +315,12 @@ void main() {
       'generate handles incomplete UTF-8 that leaves decodedChunks empty',
       () async {
         final bindings = FakeMlxBindings();
-        // 0xC2 alone is an incomplete 2-byte UTF-8 sequence.
-        // byteSink.add([0xC2]) produces no output (decodedChunks stays empty).
         final client = _FakeMlxClient()
-          ..generateNextQueue.addAll([
-            [0xC2], // incomplete UTF-8 — decodedChunks.isEmpty path
-            null,
+          ..batchStepQueue.addAll([
+            {
+              0: [0xC2],
+            }, // incomplete UTF-8
+            {0: null},
           ]);
 
         final runtime = _makeRuntime(client, bindings);
@@ -443,31 +335,25 @@ void main() {
             )
             .toList();
 
-        // Should complete without error.
         expect(chunks, isA<List<StreamChunk>>());
       },
     );
 
     test(
-      'generate handles piece.isEmpty after draining decoded chunks',
+      'generate handles split multi-byte UTF-8',
       () async {
-        // This is tricky — we need byteSink.add to produce a chunk,
-        // but draining it yields an empty string. The easiest way is to
-        // produce a chunk that decodes to empty via the sink.
-        // Actually, this path is extremely hard to hit because the UTF-8
-        // decoder won't produce empty strings. Let's use coverage:ignore
-        // or accept this edge case. For now, let's test the finally branch.
         final bindings = FakeMlxBindings();
-        // Two chunks that decode together — tests the join branch in
-        // _drainDecodedChunks when decodedChunks.length > 1.
-        // Send a multi-byte char split across two generateNext calls.
-        // U+00A9 = ©  = C2 A9 in UTF-8.
+        // U+00A9 = © = C2 A9 in UTF-8, split across two steps.
         final client = _FakeMlxClient()
-          ..generateNextQueue.addAll([
-            [0xC2], // first byte — buffered, decodedChunks empty
-            [0xA9], // second byte — completes char, decodedChunks has "©"
-            utf8.encode('!'),
-            null,
+          ..batchStepQueue.addAll([
+            {
+              0: [0xC2],
+            },
+            {
+              0: [0xA9],
+            },
+            {0: utf8.encode('!')},
+            {0: null},
           ]);
 
         final runtime = _makeRuntime(client, bindings);
@@ -492,14 +378,13 @@ void main() {
       'generate flushes remaining decoded chunks in finally block',
       () async {
         final bindings = FakeMlxBindings();
-        // Send an incomplete UTF-8 sequence so byteSink has buffered data
-        // that gets flushed in the finally block when byteSink.close() is
-        // called. The replacement char ends up in decodedChunks.
         final client = _FakeMlxClient()
-          ..generateNextQueue.addAll([
-            utf8.encode('hi'),
-            [0xC2], // incomplete — buffered in byteSink
-            null, // EOG — triggers finally block
+          ..batchStepQueue.addAll([
+            {0: utf8.encode('hi')},
+            {
+              0: [0xC2],
+            }, // incomplete — buffered
+            {0: null},
           ]);
 
         final runtime = _makeRuntime(client, bindings);
@@ -515,137 +400,33 @@ void main() {
             .toList();
 
         final text = chunks.map((c) => c.text).join();
-        // "hi" + replacement char from the flushed incomplete sequence.
         expect(text, startsWith('hi'));
       },
     );
 
-    test(
-      'yields heartbeat after consecutive empty tokens',
-      () async {
-        final bindings = FakeMlxBindings();
-        // 17 empty byte arrays — hits the empty token heartbeat path.
-        final client = _FakeMlxClient()
-          ..generateNextQueue.addAll([
-            ...List.generate(17, (_) => <int>[]),
-            null,
-          ]);
-
-        final runtime = MlxRuntime(
-          modelId: 42,
-          options: const MlxRuntimeOptions(
-            modelPath: '/tmp/model',
-            libraryPath: '/tmp/libmlx.dylib',
-            contextSize: 2048,
-            maxOutputTokensDefault: 20,
-          ),
-          client: client,
-          bindings: bindings,
-        );
-
-        final chunks = await runtime
-            .generate(
-              prompt: 'test',
-              stopSequences: const [],
-              addBos: true,
-              requiresReset: false,
-              reusePrefixMessageCount: 0,
-            )
-            .toList();
-
-        // After 16 empty tokens the assembler emits a heartbeat.
-        final heartbeats = chunks.where((c) => c.text.isEmpty).toList();
-        expect(heartbeats, isNotEmpty);
-      },
-    );
-  });
-
-  group('incremental generation & KV cache', () {
-    test(
-      'incremental generation without reset does not call resetContext',
-      () async {
-        final bindings = FakeMlxBindings();
-        final client = _FakeMlxClient()..generateNextQueue.addAll([null, null]);
-
-        final runtime = _makeRuntime(client, bindings);
-
-        // First generate.
-        await runtime
-            .generate(
-              prompt: 'first',
-              stopSequences: const [],
-              addBos: true,
-              requiresReset: false,
-              reusePrefixMessageCount: 0,
-            )
-            .toList();
-
-        // Second generate — incremental, no reset.
-        await runtime
-            .generate(
-              prompt: 'second',
-              stopSequences: const [],
-              addBos: true,
-              requiresReset: false,
-              reusePrefixMessageCount: 1,
-            )
-            .toList();
-
-        expect(client.resetContextCalls, 0);
-        // Both calls get addSpecial=true for KV cache alignment.
-        expect(client.addSpecialCalls, [true, true]);
-      },
-    );
-
-    test(
-      'reset between generations recreates context and re-sends BOS',
-      () async {
-        final bindings = FakeMlxBindings();
-        final client = _FakeMlxClient()..generateNextQueue.addAll([null, null]);
-
-        final runtime = _makeRuntime(client, bindings);
-
-        // First generate — no reset.
-        await runtime
-            .generate(
-              prompt: 'first',
-              stopSequences: const [],
-              addBos: true,
-              requiresReset: false,
-              reusePrefixMessageCount: 0,
-            )
-            .toList();
-
-        // Second generate — with reset.
-        await runtime
-            .generate(
-              prompt: 'second',
-              stopSequences: const [],
-              addBos: true,
-              requiresReset: true,
-              reusePrefixMessageCount: 0,
-            )
-            .toList();
-
-        // Reset frees old context + creates new one.
-        expect(bindings.freeContextCalls, 1);
-        expect(client.createContextCalls, 2);
-        // BOS re-sent after reset.
-        expect(client.addSpecialCalls, [true, true]);
-      },
-    );
-
-    test('three sequential generations always tokenize with BOS', () async {
+    test('yields heartbeat after consecutive empty tokens', () async {
       final bindings = FakeMlxBindings();
       final client = _FakeMlxClient()
-        ..generateNextQueue.addAll([null, null, null]);
+        ..batchStepQueue.addAll([
+          ...List.generate(17, (_) => {0: <int>[]}),
+          {0: null},
+        ]);
 
-      final runtime = _makeRuntime(client, bindings);
+      final runtime = MlxRuntime(
+        modelId: 42,
+        options: const MlxRuntimeOptions(
+          modelPath: '/tmp/model',
+          libraryPath: '/tmp/libmlx.dylib',
+          contextSize: 2048,
+          maxOutputTokensDefault: 20,
+        ),
+        client: client,
+        bindings: bindings,
+      );
 
-      // gen1: first call.
-      await runtime
+      final chunks = await runtime
           .generate(
-            prompt: 'first',
+            prompt: 'test',
             stopSequences: const [],
             addBos: true,
             requiresReset: false,
@@ -653,47 +434,22 @@ void main() {
           )
           .toList();
 
-      // gen2: incremental — still addSpecial=true for cache alignment.
-      await runtime
-          .generate(
-            prompt: 'second',
-            stopSequences: const [],
-            addBos: true,
-            requiresReset: false,
-            reusePrefixMessageCount: 1,
-          )
-          .toList();
-
-      // gen3: reset — addSpecial=true as always.
-      await runtime
-          .generate(
-            prompt: 'third',
-            stopSequences: const [],
-            addBos: true,
-            requiresReset: true,
-            reusePrefixMessageCount: 0,
-          )
-          .toList();
-
-      // All three always get addSpecial=true for KV cache alignment.
-      expect(client.addSpecialCalls, [true, true, true]);
-      // Third generate had requiresReset — frees old context + creates new.
-      expect(bindings.freeContextCalls, 1);
-      expect(client.createContextCalls, 2);
+      final heartbeats = chunks.where((c) => c.text.isEmpty).toList();
+      expect(heartbeats, isNotEmpty);
     });
   });
 
   group('mlx helpers', () {
     test('drains multiple decoded chunks via join path', () {
       final chunks = <String>['a', 'b'];
-      final piece = drainMlxDecodedChunks(chunks);
+      final piece = drainDecodedChunks(chunks);
       expect(piece, 'ab');
       expect(chunks, isEmpty);
     });
 
     test('chunked string sink writeAll and writeln', () {
       final chunks = <String>[];
-      final sink = mlxChunkedStringSink(chunks);
+      final sink = ChunkedStringSink(chunks);
       sink.writeAll([1, null, 'b'], ',');
       sink.writeln('x');
       sink.writeln();
@@ -702,23 +458,25 @@ void main() {
 
     test('chunked string sink writeCharCode', () {
       final chunks = <String>[];
-      final sink = mlxChunkedStringSink(chunks);
+      final sink = ChunkedStringSink(chunks);
       sink.writeCharCode(65); // 'A'
       expect(chunks, ['A']);
     });
   });
 
   group('multi-sequence', () {
-    test('createSequence allocates a new context handle', () {
+    test('createSequence registers new sequence', () {
       final bindings = FakeMlxBindings();
-      bindings.createContextResult = 20;
-      final client = _FakeMlxClient()..createContextResult = 20;
+      final client = _FakeMlxClient();
       final runtime = _makeRuntime(client, bindings);
 
       runtime.createSequence(1);
 
-      // 1 for constructor + 1 for createSequence.
-      expect(client.createContextCalls, 2);
+      // Should not throw when generating on sequence 1.
+      expect(
+        () => runtime.createSequence(1),
+        throwsStateError,
+      );
     });
 
     test('createSequence throws when sequence already exists', () {
@@ -726,22 +484,25 @@ void main() {
       final client = _FakeMlxClient();
       final runtime = _makeRuntime(client, bindings);
 
-      // Sequence 0 is created in the constructor.
       expect(
         () => runtime.createSequence(0),
         throwsStateError,
       );
     });
 
-    test('destroySequence frees context and removes it', () {
+    test('destroySequence removes sequence', () {
       final bindings = FakeMlxBindings();
-      final client = _FakeMlxClient()..createContextResult = 20;
+      final client = _FakeMlxClient();
       final runtime = _makeRuntime(client, bindings);
 
       runtime.createSequence(1);
       runtime.destroySequence(1);
 
-      expect(bindings.freeContextCalls, 1);
+      // Should throw since it's been removed.
+      expect(
+        () => runtime.destroySequence(1),
+        throwsStateError,
+      );
     });
 
     test('destroySequence throws for unknown sequence', () {
@@ -755,16 +516,18 @@ void main() {
       );
     });
 
-    test('forkSequence creates target and copies cache', () {
+    test('forkSequence registers target sequence', () {
       final bindings = FakeMlxBindings();
-      final client = _FakeMlxClient()..createContextResult = 20;
+      final client = _FakeMlxClient();
       final runtime = _makeRuntime(client, bindings);
 
       runtime.forkSequence(source: 0, target: 1);
 
-      expect(bindings.forkContextCalls, 1);
-      // Constructor + fork target = 2 create calls.
-      expect(client.createContextCalls, 2);
+      // Target should exist now.
+      expect(
+        () => runtime.createSequence(1),
+        throwsStateError,
+      );
     });
 
     test('forkSequence throws when source does not exist', () {
@@ -789,57 +552,18 @@ void main() {
       );
     });
 
-    test('forkSequence cleans up on failure', () {
-      final bindings = FakeMlxBindings()..forkContextResult = false;
-      final client = _FakeMlxClient()..createContextResult = 20;
-      final runtime = _makeRuntime(client, bindings);
-
-      expect(
-        () => runtime.forkSequence(source: 0, target: 1),
-        throwsStateError,
-      );
-
-      // Should have freed the target context on failure.
-      expect(bindings.freeContextCalls, 1);
-    });
-
-    test('createBatchDecoder returns a decoder', () {
-      final bindings = FakeMlxBindings();
-      final client = _FakeMlxClient();
-      final runtime = _makeRuntime(client, bindings);
-
-      final decoder = runtime.createBatchDecoder(maxTokens: 512);
-
-      expect(decoder, isNotNull);
-      expect(client.batchCreateCalls, 1);
-
-      decoder.dispose();
-    });
-
-    test('createBatchDecoder after dispose throws', () {
-      final bindings = FakeMlxBindings();
-      final client = _FakeMlxClient();
-      final runtime = _makeRuntime(client, bindings);
-
-      runtime.dispose();
-
-      expect(
-        () => runtime.createBatchDecoder(maxTokens: 512),
-        throwsStateError,
-      );
-    });
-
-    test('generate on specific sequenceId uses that context', () async {
+    test('generate on specific sequenceId works', () async {
       final bindings = FakeMlxBindings();
       final client = _FakeMlxClient()
-        ..createContextResult = 20
-        ..generateNextQueue.addAll([null, null]);
+        ..batchStepQueue.addAll([
+          {1: utf8.encode('hi')},
+          {1: null},
+        ]);
       final runtime = _makeRuntime(client, bindings);
 
       runtime.createSequence(1);
 
-      // Generate on sequence 1.
-      await runtime
+      final chunks = await runtime
           .generate(
             prompt: 'test',
             stopSequences: const [],
@@ -850,8 +574,11 @@ void main() {
           )
           .toList();
 
-      // generateBegin should have received the sequence 1 context handle.
-      expect(client.lastGenerateBeginContextHandle, 20);
+      final text = chunks.map((c) => c.text).join();
+      expect(text, 'hi');
+      // addAndPrefill should have been called for seq 1.
+      expect(client.batchAddSequenceCalls, 1);
+      expect(client.lastBatchAddSeqId, 1);
     });
 
     test('generate on non-existent sequenceId throws', () {
@@ -874,18 +601,126 @@ void main() {
       );
     });
 
-    test('reset frees non-zero sequences and resets seq 0', () {
+    test('reset clears sequences and recreates decoder', () {
       final bindings = FakeMlxBindings();
-      final client = _FakeMlxClient()..createContextResult = 20;
+      final client = _FakeMlxClient();
       final runtime = _makeRuntime(client, bindings);
 
       runtime.createSequence(1);
       runtime.reset();
 
-      // Should have freed sequence 1's context.
-      expect(bindings.freeContextCalls, 1);
-      // Should have reset sequence 0.
-      expect(client.resetContextCalls, 1);
+      // Sequence 1 should be gone.
+      expect(
+        () => runtime.destroySequence(1),
+        throwsStateError,
+      );
+      // Sequence 0 should still exist.
+      expect(
+        () => runtime.createSequence(0),
+        throwsStateError,
+      );
+      // Decoder should have been recreated.
+      expect(client.batchFreeCalls, 1);
+      expect(client.batchCreateCalls, 2);
+    });
+  });
+
+  group('MlxBatchCoordinator', () {
+    test('awaitStep coalesces and dispatches via Timer.run', () async {
+      final client = _FakeMlxClient()
+        ..batchStepQueue.add({0: utf8.encode('hello')});
+      final bindings = FakeMlxBindings();
+      final decoder = MlxBatchDecoder(
+        client: client,
+        handles: MlxHandles.fromModelId(modelId: 1, bindings: bindings),
+        maxTokens: 512,
+      );
+      final coordinator = MlxBatchCoordinator(decoder: decoder);
+
+      coordinator.addAndPrefill(0, [1, 2, 3], const SamplingOptions());
+
+      final result = await coordinator.awaitStep(0);
+
+      expect(result, utf8.encode('hello'));
+      decoder.dispose();
+    });
+
+    test('removeSequence is idempotent', () {
+      final client = _FakeMlxClient();
+      final bindings = FakeMlxBindings();
+      final decoder = MlxBatchDecoder(
+        client: client,
+        handles: MlxHandles.fromModelId(modelId: 1, bindings: bindings),
+        maxTokens: 512,
+      );
+      final coordinator = MlxBatchCoordinator(decoder: decoder);
+
+      coordinator.addAndPrefill(0, [1, 2, 3], const SamplingOptions());
+      coordinator.removeSequence(0);
+      // Second call should be a no-op.
+      coordinator.removeSequence(0);
+
+      expect(client.batchRemoveSequenceCalls, 1);
+      decoder.dispose();
+    });
+
+    test('EOG automatically removes sequence from batch', () async {
+      final client = _FakeMlxClient()..batchStepQueue.add({0: null});
+      final bindings = FakeMlxBindings();
+      final decoder = MlxBatchDecoder(
+        client: client,
+        handles: MlxHandles.fromModelId(modelId: 1, bindings: bindings),
+        maxTokens: 512,
+      );
+      final coordinator = MlxBatchCoordinator(decoder: decoder);
+
+      coordinator.addAndPrefill(0, [1, 2, 3], const SamplingOptions());
+
+      final result = await coordinator.awaitStep(0);
+      expect(result, isNull);
+      expect(coordinator.activeCount, 0);
+
+      // removeSequence after EOG should be no-op.
+      coordinator.removeSequence(0);
+      expect(client.batchRemoveSequenceCalls, 1);
+      decoder.dispose();
+    });
+
+    test('dispatchNow dispatches synchronously', () async {
+      final client = _FakeMlxClient()
+        ..batchStepQueue.add({0: utf8.encode('sync')});
+      final bindings = FakeMlxBindings();
+      final decoder = MlxBatchDecoder(
+        client: client,
+        handles: MlxHandles.fromModelId(modelId: 1, bindings: bindings),
+        maxTokens: 512,
+      );
+      final coordinator = MlxBatchCoordinator(decoder: decoder);
+
+      coordinator.addAndPrefill(0, [1, 2, 3], const SamplingOptions());
+
+      final future = coordinator.awaitStep(0);
+      coordinator.dispatchNow();
+
+      final result = await future;
+      expect(result, utf8.encode('sync'));
+      decoder.dispose();
+    });
+
+    test('error in step propagates to all waiters', () async {
+      final client = _FakeMlxClient()..batchStepShouldThrow = true;
+      final bindings = FakeMlxBindings();
+      final decoder = MlxBatchDecoder(
+        client: client,
+        handles: MlxHandles.fromModelId(modelId: 1, bindings: bindings),
+        maxTokens: 512,
+      );
+      final coordinator = MlxBatchCoordinator(decoder: decoder);
+
+      coordinator.addAndPrefill(0, [1, 2, 3], const SamplingOptions());
+
+      expect(coordinator.awaitStep(0), throwsStateError);
+      decoder.dispose();
     });
   });
 }
@@ -895,15 +730,10 @@ final class _FakeMlxClient implements MlxClientApi {
 
   List<int> tokenizeResult = const [1, 2, 3];
   final List<bool> addSpecialCalls = [];
-  int createContextResult = 10;
   int createContextCalls = 0;
+  int createContextResult = 10;
   int resetContextCalls = 0;
-  int generateBeginCalls = 0;
   int disposeCalls = 0;
-
-  // Queue of byte lists to return from generateNext. null = done.
-  final List<List<int>?> generateNextQueue = [];
-  int generateNextCalls = 0;
 
   @override
   List<int> tokenize(
@@ -924,7 +754,6 @@ final class _FakeMlxClient implements MlxClientApi {
   @override
   void resetContext(MlxHandles handles, int maxTokens) {
     resetContextCalls++;
-    // Match real MlxClient.resetContext: assign a new context handle.
     handles.contextHandle = createContext(handles, maxTokens);
   }
 
@@ -937,23 +766,14 @@ final class _FakeMlxClient implements MlxClientApi {
     List<int> tokens,
     SamplingOptions options, {
     required int contextHandle,
-  }) {
-    generateBeginCalls++;
-    lastGenerateBeginContextHandle = contextHandle;
-  }
-
-  int? lastGenerateBeginContextHandle;
+  }) {}
 
   @override
   List<int>? generateNext(
     MlxHandles handles, {
     required int contextHandle,
     int bufferSize = 256,
-  }) {
-    generateNextCalls++;
-    if (generateNextQueue.isEmpty) return null;
-    return generateNextQueue.removeAt(0);
-  }
+  }) => null;
 
   @override
   void dispose(MlxHandles handles) {
@@ -966,8 +786,19 @@ final class _FakeMlxClient implements MlxClientApi {
     MlxModelLoadProgressCallback? onProgress,
   }) => throw UnimplementedError();
 
-  // Batch stubs.
+  // -- Batch API --
+
   int batchCreateCalls = 0;
+  int batchFreeCalls = 0;
+  int batchAddSequenceCalls = 0;
+  int? lastBatchAddSeqId;
+  int batchPrefillCalls = 0;
+  int batchRemoveSequenceCalls = 0;
+  bool batchStepShouldThrow = false;
+
+  /// Queue of step results. Each entry maps seqId → bytes (null = EOG).
+  final List<Map<int, List<int>?>> batchStepQueue = [];
+
   @override
   int batchCreate(MlxHandles handles, int maxTokens) {
     batchCreateCalls++;
@@ -975,29 +806,54 @@ final class _FakeMlxClient implements MlxClientApi {
   }
 
   @override
-  void batchFree(MlxHandles handles, int batchHandle) {}
+  void batchFree(MlxHandles handles, int batchHandle) {
+    batchFreeCalls++;
+  }
+
   @override
   void batchAddSequence(
     MlxHandles handles,
     int batchHandle,
     int seqId,
     List<int> tokens,
-  ) {}
+  ) {
+    batchAddSequenceCalls++;
+    lastBatchAddSeqId = seqId;
+  }
+
   @override
   int batchPrefill(
     MlxHandles handles,
     int batchHandle,
     SamplingOptions options,
-  ) => 0;
+  ) {
+    batchPrefillCalls++;
+    return 1;
+  }
+
   @override
   Map<int, List<int>?> batchStep(
     MlxHandles handles,
     int batchHandle, {
     int maxSeqs = 16,
     int bufferSize = 4096,
-  }) => {};
+  }) {
+    if (batchStepShouldThrow) {
+      throw StateError('batchStep failed');
+    }
+    if (batchStepQueue.isEmpty) return {};
+    return batchStepQueue.removeAt(0);
+  }
+
   @override
-  void batchRemoveSequence(MlxHandles handles, int batchHandle, int seqId) {}
+  void batchRemoveSequence(
+    MlxHandles handles,
+    int batchHandle,
+    int seqId,
+  ) {
+    batchRemoveSequenceCalls++;
+  }
+
   @override
   int batchActiveCount(MlxHandles handles, int batchHandle) => 0;
 }

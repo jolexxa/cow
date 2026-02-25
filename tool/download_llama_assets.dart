@@ -63,7 +63,22 @@ Future<void> main(List<String> args) async {
         platform.assetFolder,
         platform.archFolder,
       ),
-    )..createSync(recursive: true);
+    );
+
+    // Clean out old libraries before copying new ones.
+    if (destDir.existsSync()) {
+      for (final entity in destDir.listSync()) {
+        final path = entity.path;
+        // Use Link.deleteSync for symlinks (even broken ones),
+        // File.deleteSync for regular files.
+        if (FileSystemEntity.isLinkSync(path)) {
+          Link(path).deleteSync();
+        } else if (FileSystemEntity.isFileSync(path)) {
+          File(path).deleteSync();
+        }
+      }
+    }
+    destDir.createSync(recursive: true);
 
     final libs = _findAllNativeLibraries(extractedRoot, platform);
     for (final sourceFile in libs) {

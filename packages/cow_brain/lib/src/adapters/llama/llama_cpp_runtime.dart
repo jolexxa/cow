@@ -1,8 +1,6 @@
 // This is the native llama.cpp runtime; docs can be expanded later.
 // Plain string composition keeps the streaming logic straightforward.
-// ignore_for_file: public_member_api_docs
 
-import 'dart:convert';
 import 'dart:ffi';
 import 'dart:math' show min;
 
@@ -12,11 +10,48 @@ import 'package:cow_brain/src/adapters/llama/llama_bindings.dart';
 import 'package:cow_brain/src/adapters/llama/llama_client.dart';
 import 'package:cow_brain/src/adapters/llama/llama_handles.dart';
 import 'package:cow_brain/src/adapters/llama/llama_model_metadata.dart';
-import 'package:cow_brain/src/adapters/stream_assembler.dart';
+import 'package:cow_brain/src/adapters/llama/llama_prefill_batcher.dart';
 import 'package:cow_brain/src/adapters/stream_chunk.dart';
+import 'package:cow_brain/src/adapters/token_decoder.dart';
 import 'package:cow_brain/src/isolate/brain_isolate.dart';
 import 'package:cow_brain/src/isolate/models.dart';
-import 'package:meta/meta.dart';
+
+/// Per-sequence state bundling BOS tracking and cached token history.
+final class SequenceState {
+  /// Creates a new, empty sequence state.
+  SequenceState();
+
+  /// Creates a copy of [other].
+  SequenceState.from(SequenceState other)
+    : bosApplied = other.bosApplied,
+      cachedTokens = List<int>.of(other.cachedTokens);
+
+  /// Whether the beginning-of-sequence token has been applied.
+  bool bosApplied = false;
+
+  /// Tokens that have already been fed into the KV cache.
+  List<int> cachedTokens = [];
+
+  /// Resets the sequence state to its initial values.
+  void reset() {
+    bosApplied = false;
+    cachedTokens = [];
+  }
+
+  /// Trims cached tokens to [length], discarding the rest.
+  void trimCacheTo(int length) {
+    cachedTokens = length >= cachedTokens.length
+        ? cachedTokens
+        : cachedTokens.sublist(0, length);
+  }
+
+  /// Drops [count] tokens from the front of the cache.
+  void dropCacheFront(int count) {
+    cachedTokens = count >= cachedTokens.length
+        ? []
+        : cachedTokens.sublist(count);
+  }
+}
 
 /// Native llama.cpp runtime that powers the [InferenceAdapter].
 ///
@@ -50,16 +85,21 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
       client: _client,
       handles: _handles,
     );
+    _prefillBatcher = LlamaPrefillBatcher(
+      client: _client,
+      handles: _handles,
+      nBatch: options.contextOptions.nBatch,
+    );
   }
 
   final LlamaCppRuntimeOptions _options;
   final LlamaClientApi _client;
   late final LlamaHandles _handles;
   late final LlamaBatchDecoder _batchDecoder;
+  late final LlamaPrefillBatcher _prefillBatcher;
 
   bool _disposed = false;
-  final Map<int, bool> _bosApplied = {0: false};
-  final Map<int, List<int>> _cachedTokens = {0: []};
+  final Map<int, SequenceState> _sequences = {0: SequenceState()};
 
   /// Reads the chat template from the loaded model's GGUF metadata.
   ///
@@ -76,12 +116,14 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
   @override
   int countTokens(String prompt, {required bool addBos}) {
     _ensureNotDisposed();
-    // Use sequence 0's bos state for budget estimation.
-    final bos = _bosApplied[0] ?? false;
+    // Always count conservatively (as if BOS not yet applied). At worst we
+    // overestimate by one token, which is safe for budget estimation. The
+    // alternative — using a specific sequence's bos state — was incorrect
+    // because the context manager is sequence-agnostic.
     final tokens = _client.tokenize(
       _handles,
       prompt,
-      addSpecial: addBos && !bos,
+      addSpecial: addBos,
     );
     return tokens.length;
   }
@@ -97,41 +139,27 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
   }) async* {
     _ensureNotDisposed();
     _ensureSequenceExists(sequenceId);
+    final seq = _sequences[sequenceId]!;
 
     if (requiresReset) {
       _resetSequence(sequenceId);
     }
 
-    final seqBos = _bosApplied[sequenceId]!;
     final promptTokens = _client.tokenize(
       _handles,
       prompt,
-      addSpecial: addBos && !seqBos,
+      addSpecial: addBos && !seq.bosApplied,
     );
     if (addBos) {
-      _bosApplied[sequenceId] = true;
+      seq.bosApplied = true;
     }
 
-    final seqCached = _cachedTokens[sequenceId]!;
-
-    // Find common prefix between cached and new prompt tokens.
-    final commonPrefixLen = _commonPrefixLengthFor(promptTokens, seqCached);
-
-    // Trim diverged tokens from the KV cache.
-    if (commonPrefixLen < seqCached.length) {
-      final b = _handles.bindings;
-      final mem = b.llama_get_memory(_handles.context);
-      final posMax = b.llama_memory_seq_pos_max(mem, sequenceId);
-      if (posMax >= commonPrefixLen) {
-        b.llama_memory_seq_rm(
-          mem,
-          sequenceId,
-          commonPrefixLen,
-          posMax + 1,
-        );
-      }
-      _cachedTokens[sequenceId] = seqCached.sublist(0, commonPrefixLen);
-    }
+    // Find common prefix and trim diverged KV cache entries.
+    final commonPrefixLen = _commonPrefixLengthFor(
+      promptTokens,
+      seq.cachedTokens,
+    );
+    _trimDivergedCache(seq, sequenceId, commonPrefixLen);
 
     final newTokens = promptTokens.sublist(commonPrefixLen);
 
@@ -142,51 +170,34 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
       maxOutputTokens,
     );
     if (dropped > 0) {
-      final current = _cachedTokens[sequenceId]!;
-      _cachedTokens[sequenceId] = dropped >= current.length
-          ? []
-          : current.sublist(dropped);
+      seq.dropCacheFront(dropped);
     }
-    _decodeTokens(newTokens, sequenceId: sequenceId);
-    _cachedTokens[sequenceId] = [
-      ..._cachedTokens[sequenceId]!,
-      ...newTokens,
-    ];
-
-    final temperature = _options.samplingOptions.temperature ?? 0.7;
-    final samplingOptions = SamplingOptions(
-      seed: _options.samplingOptions.seed,
-      topK: _options.samplingOptions.topK,
-      topP: _options.samplingOptions.topP,
-      minP: _options.samplingOptions.minP,
-      temperature: temperature,
-      typicalP: _options.samplingOptions.typicalP,
-      penaltyRepeat: _options.samplingOptions.penaltyRepeat,
-      penaltyLastN: _options.samplingOptions.penaltyLastN,
-    );
-    final sampler = LlamaSamplerChain.build(_handles.bindings, samplingOptions);
-    final assembler = StreamAssembler(stopSequences: stopSequences);
-
-    final decodedChunks = <String>[];
-    final chunkSink = StringConversionSink.fromStringSink(
-      _ChunkedStringSink(decodedChunks),
-    );
-    final byteSink = const Utf8Decoder(
-      allowMalformed: true,
-    ).startChunkedConversion(chunkSink);
-
+    // Submit prefill for batched decode. The await yields to the event loop,
+    // letting other concurrent generate() calls reach their own submitPrefill.
+    // Timer.run then batches all of them into a single decodeBatch FFI call.
     int? lastBatchIndex;
+    if (newTokens.isNotEmpty) {
+      final prefillResult = await _prefillBatcher.submitPrefill(
+        sequenceId: sequenceId,
+        tokens: newTokens,
+      );
+      lastBatchIndex = prefillResult.batchIndex;
+    }
+    seq.cachedTokens = [...seq.cachedTokens, ...newTokens];
+
+    final sampler = _buildSampler();
+    final decoder = TokenDecoder(stopSequences: stopSequences);
 
     try {
       for (var i = 0; i < maxOutputTokens; i += 1) {
         // Sample from the correct logit position: explicit batch index
-        // after batched decode, or -1 (last position) after prefill.
+        // after batched prefill or decode, or -1 (last position) when
+        // newTokens was empty (full cache hit).
         final token = lastBatchIndex != null
             ? _client.sampleAt(_handles, sampler, lastBatchIndex)
             : _client.sampleNext(_handles, sampler);
 
-        final b = _handles.bindings;
-        if (b.llama_vocab_is_eog(_handles.vocab, token)) {
+        if (_handles.bindings.llama_vocab_is_eog(_handles.vocab, token)) {
           break;
         }
 
@@ -197,55 +208,17 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
           sequenceId: sequenceId,
         );
         lastBatchIndex = result.batchIndex;
-        _cachedTokens[sequenceId]!.add(token);
+        seq.cachedTokens.add(token);
 
-        if (b.llama_vocab_is_control(_handles.vocab, token)) {
-          final chunk = assembler.addEmptyToken();
-          if (chunk != null) {
-            yield chunk;
-          }
-          continue;
-        }
-        final bytes = _client.tokenToBytes(_handles, token);
-        if (bytes.isEmpty) {
-          final chunk = assembler.addEmptyToken();
-          if (chunk != null) {
-            yield chunk;
-          }
-          continue;
-        }
-        byteSink.add(bytes);
-        if (decodedChunks.isEmpty) {
-          final chunk = assembler.addEmptyToken(); // coverage:ignore-line
-          if (chunk != null) {
-            yield chunk; // coverage:ignore-line
-          }
-          continue;
-        }
-        final piece = _drainDecodedChunks(decodedChunks);
-        if (piece.isEmpty) {
-          final chunk = assembler.addEmptyToken();
-          if (chunk != null) {
-            yield chunk; // coverage:ignore-line
-          }
-          continue;
-        }
-
-        final chunk = assembler.addText(piece);
-        if (chunk != null) {
-          yield chunk;
-        }
-        if (assembler.stopped) break;
+        final chunk = _decodeToken(token, decoder);
+        if (chunk != null) yield chunk;
+        if (decoder.stopped) break;
       }
     } finally {
-      byteSink.close();
-      if (decodedChunks.isNotEmpty) {
-        assembler.appendPending(_drainDecodedChunks(decodedChunks));
-      }
       sampler.dispose();
     }
 
-    for (final chunk in assembler.flush()) {
+    for (final chunk in decoder.finish()) {
       yield chunk;
     }
   }
@@ -264,69 +237,55 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
   @override
   void createSequence(int sequenceId) {
     _ensureNotDisposed();
-    if (_cachedTokens.containsKey(sequenceId)) {
+    if (_sequences.containsKey(sequenceId)) {
       throw StateError('Sequence $sequenceId already exists');
     }
-    _cachedTokens[sequenceId] = [];
-    _bosApplied[sequenceId] = false;
+    _sequences[sequenceId] = SequenceState();
   }
 
   @override
   void destroySequence(int sequenceId) {
     _ensureNotDisposed();
     _ensureSequenceExists(sequenceId);
-    // Remove KV cache for this sequence.
-    final b = _handles.bindings;
-    final mem = b.llama_get_memory(_handles.context);
-    final posMin = b.llama_memory_seq_pos_min(mem, sequenceId);
-    final posMax = b.llama_memory_seq_pos_max(mem, sequenceId);
-    if (posMin >= 0 && posMax >= posMin) {
-      b.llama_memory_seq_rm(mem, sequenceId, posMin, posMax + 1);
-    }
-    _cachedTokens.remove(sequenceId);
-    _bosApplied.remove(sequenceId);
+    _clearSequenceKv(sequenceId);
+    _sequences.remove(sequenceId);
   }
 
   @override
   void forkSequence({required int source, required int target}) {
     _ensureNotDisposed();
     _ensureSequenceExists(source);
-    if (_cachedTokens.containsKey(target)) {
+    if (_sequences.containsKey(target)) {
       throw StateError('Target sequence $target already exists');
     }
-    // Copy KV cache from source to target.
-    final b = _handles.bindings;
-    final mem = b.llama_get_memory(_handles.context);
-    final posMin = b.llama_memory_seq_pos_min(mem, source);
-    final posMax = b.llama_memory_seq_pos_max(mem, source);
-    if (posMin >= 0 && posMax >= posMin) {
-      b.llama_memory_seq_cp(mem, source, target, posMin, posMax + 1);
-    }
-    _cachedTokens[target] = List<int>.of(_cachedTokens[source]!);
-    _bosApplied[target] = _bosApplied[source]!;
+    // TODO(llama.cpp): seq_cp requires "full" (non-split) KV buffers, which
+    // aren't available when maxSequences > 1. For now, create a fresh sequence
+    // and copy the token list — the next generate() call will re-prefill via
+    // prefix matching. Replace with seq_cp when upstream supports it.
+    _sequences[target] = SequenceState.from(_sequences[source]!);
   }
 
   @override
   void reset() {
     _ensureNotDisposed();
-    _client.resetContext(_handles, _options.contextOptions);
-    _cachedTokens.clear();
-    _bosApplied.clear();
-    _cachedTokens[0] = [];
-    _bosApplied[0] = false;
+    _client.resetContext(
+      _handles,
+      _options.contextOptions,
+      maxSequences: _options.maxSequences,
+    );
+    _sequences
+      ..clear()
+      ..[0] = SequenceState();
   }
 
   void _resetSequence(int sequenceId) {
-    final b = _handles.bindings;
-    final mem = b.llama_get_memory(_handles.context);
-    final posMin = b.llama_memory_seq_pos_min(mem, sequenceId);
-    final posMax = b.llama_memory_seq_pos_max(mem, sequenceId);
-    if (posMin >= 0 && posMax >= posMin) {
-      b.llama_memory_seq_rm(mem, sequenceId, posMin, posMax + 1);
-    }
-    _cachedTokens[sequenceId] = [];
-    _bosApplied[sequenceId] = false;
+    _clearSequenceKv(sequenceId);
+    _sequences[sequenceId]!.reset();
   }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
 
   void _ensureNotDisposed() {
     if (_disposed) {
@@ -335,9 +294,73 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
   }
 
   void _ensureSequenceExists(int sequenceId) {
-    if (!_cachedTokens.containsKey(sequenceId)) {
+    if (!_sequences.containsKey(sequenceId)) {
       throw StateError('Sequence $sequenceId does not exist');
     }
+  }
+
+  /// Returns the KV cache position bounds for [sequenceId].
+  ({int posMin, int posMax}) _sequenceBounds(int sequenceId) {
+    final b = _handles.bindings;
+    final mem = b.llama_get_memory(_handles.context);
+    return (
+      posMin: b.llama_memory_seq_pos_min(mem, sequenceId),
+      posMax: b.llama_memory_seq_pos_max(mem, sequenceId),
+    );
+  }
+
+  /// Removes all KV cache entries for [sequenceId].
+  void _clearSequenceKv(int sequenceId) {
+    final (:posMin, :posMax) = _sequenceBounds(sequenceId);
+    if (posMin >= 0 && posMax >= posMin) {
+      final b = _handles.bindings;
+      final mem = b.llama_get_memory(_handles.context);
+      b.llama_memory_seq_rm(mem, sequenceId, posMin, posMax + 1);
+    }
+  }
+
+  /// Trims KV cache entries that diverge after [commonPrefixLen],
+  /// and updates [seq]'s cached token list.
+  void _trimDivergedCache(
+    SequenceState seq,
+    int sequenceId,
+    int commonPrefixLen,
+  ) {
+    if (commonPrefixLen >= seq.cachedTokens.length) return;
+    final posMax = _sequenceBounds(sequenceId).posMax;
+    if (posMax >= commonPrefixLen) {
+      final b = _handles.bindings;
+      final mem = b.llama_get_memory(_handles.context);
+      b.llama_memory_seq_rm(mem, sequenceId, commonPrefixLen, posMax + 1);
+    }
+    seq.trimCacheTo(commonPrefixLen);
+  }
+
+  /// Builds a sampler chain from the runtime's sampling options.
+  LlamaSamplerChain _buildSampler() {
+    final opts = _options.samplingOptions;
+    return LlamaSamplerChain.build(
+      _handles.bindings,
+      SamplingOptions(
+        seed: opts.seed,
+        topK: opts.topK,
+        topP: opts.topP,
+        minP: opts.minP,
+        temperature: opts.temperature ?? 0.7,
+        typicalP: opts.typicalP,
+        penaltyRepeat: opts.penaltyRepeat,
+        penaltyLastN: opts.penaltyLastN,
+      ),
+    );
+  }
+
+  /// Decodes [token] bytes and feeds them to [decoder].
+  StreamChunk? _decodeToken(int token, TokenDecoder decoder) {
+    if (_handles.bindings.llama_vocab_is_control(_handles.vocab, token)) {
+      return decoder.feedEmptyToken();
+    }
+    final bytes = _client.tokenToBytes(_handles, token);
+    return bytes.isEmpty ? decoder.feedEmptyToken() : decoder.feedBytes(bytes);
   }
 
   int _ensureRoomFor(
@@ -345,11 +368,7 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
     int promptTokens,
     int maxOutputTokens,
   ) {
-    final b = _handles.bindings;
-    final mem = b.llama_get_memory(_handles.context);
-
-    final posMin = b.llama_memory_seq_pos_min(mem, sequenceId);
-    final posMax = b.llama_memory_seq_pos_max(mem, sequenceId);
+    final (:posMin, :posMax) = _sequenceBounds(sequenceId);
     final currentTokens = (posMin >= 0 && posMax >= posMin)
         ? (posMax - posMin + 1)
         : 0;
@@ -376,6 +395,8 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
     }
 
     final tokensToDrop = projectedTotal - perSeqBudget;
+    final b = _handles.bindings;
+    final mem = b.llama_get_memory(_handles.context);
     if (tokensToDrop >= currentTokens) {
       b.llama_memory_seq_rm(mem, sequenceId, posMin, posMax + 1);
       return currentTokens;
@@ -401,90 +422,5 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
       if (tokens[i] != cached[i]) return i;
     }
     return limit;
-  }
-
-  void _decodeTokens(List<int> tokens, {required int sequenceId}) {
-    if (tokens.isEmpty) {
-      return;
-    }
-    final maxBatch = _options.contextOptions.nBatch;
-    if (tokens.length <= maxBatch) {
-      _client.decode(
-        _handles,
-        _handles.context,
-        tokens,
-        sequenceId: sequenceId,
-      );
-      return;
-    }
-    for (var i = 0; i < tokens.length; i += maxBatch) {
-      final end = (i + maxBatch < tokens.length) ? i + maxBatch : tokens.length;
-      _client.decode(
-        _handles,
-        _handles.context,
-        tokens.sublist(i, end),
-        sequenceId: sequenceId,
-      );
-    }
-  }
-}
-
-String _drainDecodedChunks(List<String> decodedChunks) {
-  final piece = decodedChunks.length == 1
-      ? decodedChunks.removeAt(0)
-      : decodedChunks.join();
-  if (decodedChunks.isNotEmpty) {
-    decodedChunks.clear();
-  }
-  return piece;
-}
-
-@visibleForTesting
-String drainDecodedChunks(List<String> decodedChunks) =>
-    _drainDecodedChunks(decodedChunks);
-
-@visibleForTesting
-StringSink llamaChunkedStringSink(List<String> chunks) =>
-    _ChunkedStringSink(chunks);
-
-final class _ChunkedStringSink implements StringSink {
-  _ChunkedStringSink(this._chunks);
-
-  final List<String> _chunks;
-
-  @override
-  void write(Object? obj) {
-    if (obj == null) {
-      return;
-    }
-    _chunks.add(obj.toString());
-  }
-
-  @override
-  void writeAll(Iterable<Object?> objects, [String separator = '']) {
-    var first = true;
-    for (final obj in objects) {
-      if (!first && separator.isNotEmpty) {
-        _chunks.add(separator);
-      }
-      first = false;
-      if (obj == null) {
-        continue;
-      }
-      _chunks.add(obj.toString());
-    }
-  }
-
-  @override
-  void writeCharCode(int charCode) {
-    _chunks.add(String.fromCharCode(charCode));
-  }
-
-  @override
-  void writeln([Object? obj = '']) {
-    if (obj != null && obj.toString().isNotEmpty) {
-      _chunks.add(obj.toString());
-    }
-    _chunks.add('\n');
   }
 }

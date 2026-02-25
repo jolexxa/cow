@@ -30,21 +30,13 @@ void main() {
       final withoutTools = counter.countPromptTokens(
         messages: messages,
         tools: const [],
-        systemApplied: false,
       );
       final withTools = counter.countPromptTokens(
         messages: messages,
         tools: const [tool],
-        systemApplied: false,
-      );
-      final systemApplied = counter.countPromptTokens(
-        messages: messages,
-        tools: const [],
-        systemApplied: true,
       );
 
       expect(withTools, greaterThan(withoutTools));
-      expect(systemApplied, lessThan(withoutTools));
     });
   });
 }

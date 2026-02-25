@@ -19,7 +19,6 @@ void main() {
             parameters: <String, Object?>{},
           ),
         ],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -33,7 +32,6 @@ void main() {
           Message(role: Role.user, content: 'Hi'),
         ],
         tools: const <ToolDefinition>[],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -53,7 +51,6 @@ void main() {
             parameters: <String, Object?>{},
           ),
         ],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -71,7 +68,6 @@ void main() {
           Message(role: Role.user, content: 'Hello'),
         ],
         tools: const <ToolDefinition>[],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -88,7 +84,6 @@ void main() {
           Message(role: Role.system, content: 'System after user'),
         ],
         tools: const <ToolDefinition>[],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -102,7 +97,6 @@ void main() {
           Message(role: Role.assistant, content: 'Plain response'),
         ],
         tools: const <ToolDefinition>[],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -127,7 +121,6 @@ void main() {
           ),
         ],
         tools: const <ToolDefinition>[],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -152,7 +145,6 @@ void main() {
           ),
         ],
         tools: const <ToolDefinition>[],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -169,7 +161,6 @@ void main() {
           Message(role: Role.tool, content: 'Only tool'),
         ],
         tools: const <ToolDefinition>[],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -185,7 +176,6 @@ void main() {
           Message(role: Role.tool, content: 'B'),
         ],
         tools: const <ToolDefinition>[],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -196,21 +186,6 @@ void main() {
       expect(startCount, 1);
       expect(responseCount, 2);
       expect(endCount, greaterThanOrEqualTo(1));
-    });
-
-    test('skips system messages when systemApplied is true', () {
-      final output = formatter.format(
-        messages: const <Message>[
-          Message(role: Role.system, content: 'Should be skipped'),
-          Message(role: Role.user, content: 'Hello'),
-        ],
-        tools: const <ToolDefinition>[],
-        systemApplied: true,
-        enableReasoning: true,
-      );
-
-      expect(output, isNot(contains('Should be skipped')));
-      expect(output, contains('Hello'));
     });
 
     test('exposes stop sequences and BOS setting', () {
@@ -242,7 +217,6 @@ void main() {
           ),
         ],
         tools: const <ToolDefinition>[],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -259,7 +233,6 @@ void main() {
           Message(role: Role.user, content: 'Thanks'),
         ],
         tools: const <ToolDefinition>[],
-        systemApplied: false,
         enableReasoning: true,
       );
 

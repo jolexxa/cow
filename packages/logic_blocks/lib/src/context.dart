@@ -18,6 +18,13 @@ abstract interface class Context {
   /// Adds an error to the logic block. Errors are immediately processed by
   /// the logic block's [LogicBlock.handleError] callback.
   void addError(Object e);
+
+  /// Whether the logic block is currently running and can accept inputs.
+  bool get isStarted;
+
+  /// Tracks a [Future] so that [LogicBlock.task] will not complete until
+  /// [future] has finished.
+  void trackFuture(Future<void> future);
 }
 
 final class _DefaultContext<TState extends StateLogic<TState>> extends Context {
@@ -36,6 +43,13 @@ final class _DefaultContext<TState extends StateLogic<TState>> extends Context {
 
   @override
   void addError(Object e) => logic._addError(e);
+
+  @override
+  bool get isStarted => logic.isStarted;
+
+  @override
+  void trackFuture(Future<void> future) =>
+      logic._futureTracker.trackFuture(future);
 }
 
 final class _ContextAdapter implements Context {
@@ -52,6 +66,9 @@ final class _ContextAdapter implements Context {
   void deactivate() => _active = false;
 
   bool get isActive => _active && context != null;
+
+  @override
+  bool get isStarted => context?.isStarted ?? false;
 
   ValueCallback<Object>? get onError {
     final context = this.context;
@@ -120,6 +137,11 @@ final class _ContextAdapter implements Context {
 
     context.addError(e);
   }
+
+  @override
+  void trackFuture(Future<void> future) {
+    context?.trackFuture(future);
+  }
 }
 
 /// Fake logic block context provided for testing convenience.
@@ -131,6 +153,16 @@ final class FakeContext implements Context {
   /// Creates a new [FakeContext].
   FakeContext();
 
+  /// The simulated logic block status. Defaults to [LogicBlockStatus.started].
+  LogicBlockStatus status = LogicBlockStatus.started;
+
+  @override
+  bool get isStarted => status == LogicBlockStatus.started;
+
+  /// A [Future] that completes when all tracked async operations have
+  /// finished. Use this to await in-flight [StatefulFuture] work in tests.
+  Future<void> get task => _futureTracker.future;
+
   /// Inputs that have been added by the state under test.
   Iterable<Object> get inputs => _inputs;
 
@@ -140,6 +172,7 @@ final class FakeContext implements Context {
   /// Errors that have been reported by the state under test.
   Iterable<Object> get errors => _errors;
 
+  final FutureTracker _futureTracker = FutureTracker();
   final List<Object> _inputs = [];
   final List<Object> _outputs = [];
   final Blackboard _blackboard = Blackboard();
@@ -157,11 +190,15 @@ final class FakeContext implements Context {
   @override
   void addError(Object e) => _errors.add(e);
 
+  @override
+  void trackFuture(Future<void> future) => _futureTracker.trackFuture(future);
+
   /// Sets a value of type [TData] in the fake blackboard.
   void set<TData extends Object>(TData data) => _blackboard.set(data);
 
   /// Clears all recorded inputs, outputs, errors, and blackboard data.
   void reset() {
+    _futureTracker.reset();
     _inputs.clear();
     _outputs.clear();
     _errors.clear();

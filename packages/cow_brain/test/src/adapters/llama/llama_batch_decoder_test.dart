@@ -158,8 +158,11 @@ final class _FakeClient implements LlamaClientApi {
   }) => throw UnimplementedError();
 
   @override
-  void resetContext(LlamaHandles handles, LlamaContextOptions options) =>
-      throw UnimplementedError();
+  void resetContext(
+    LlamaHandles handles,
+    LlamaContextOptions options, {
+    required int maxSequences,
+  }) => throw UnimplementedError();
 
   @override
   int sampleNext(LlamaHandles handles, LlamaSamplerChain sampler) =>

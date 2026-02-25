@@ -1,3 +1,6 @@
+// For clarity.
+// ignore_for_file: cascade_invocations
+
 import 'package:logic_blocks/logic_blocks.dart';
 import 'package:test/test.dart';
 
@@ -22,6 +25,7 @@ void main() {
 
       binding.onState<TestLogicBlockState>((state) => called++);
       logic
+        ..start()
         ..input(const GoToB())
         ..input(const GoToA());
 
@@ -34,6 +38,7 @@ void main() {
 
       binding.onState<TestLogicBlockState>((state) => called++);
 
+      logic.start();
       logic.input(const GoToA()); // already in A, so nothing happens
 
       expect(called, 1);
@@ -65,6 +70,7 @@ void main() {
 
       final e = Exception('Test error');
 
+      logic.start();
       logic.input(AddError(e));
 
       expect(errors.single, e);
@@ -79,6 +85,7 @@ void main() {
         ..onInput<GoToB>((_) => b++);
 
       logic
+        ..start()
         ..input(const CustomInput())
         ..input(const GoToB())
         ..input(const GoToA())
@@ -98,6 +105,7 @@ void main() {
         ..onState<TestLogicBlockState>((_) => called = true)
         ..dispose();
 
+      logic.start();
       logic.input(const GoToB());
 
       expect(called, isFalse);
@@ -117,6 +125,7 @@ void main() {
       var called = false;
       binding.onInput<GoToA>((_) => called = true);
 
+      logic.start();
       logic.input(const GoToB());
 
       expect(called, isFalse);
@@ -136,6 +145,7 @@ void main() {
       var called = false;
       binding.onError<FormatException>((_) => called = true);
 
+      logic.start();
       logic.input(AddError(Exception('not a format exception')));
 
       expect(called, isFalse);

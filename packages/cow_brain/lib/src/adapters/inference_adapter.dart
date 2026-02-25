@@ -57,14 +57,12 @@ final class InferenceAdapter implements LlmAdapter {
   Stream<ModelOutput> next({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
     required bool enableReasoning,
     required LlmConfig config,
   }) async* {
     final prompt = profile.formatter.format(
       messages: messages,
       tools: tools,
-      systemApplied: systemApplied,
       enableReasoning: enableReasoning,
     );
     yield* profile.streamParser.parse(

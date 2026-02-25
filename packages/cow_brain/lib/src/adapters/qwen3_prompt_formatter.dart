@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:cow_brain/src/adapters/prompt_formatter.dart';
 import 'package:cow_brain/src/isolate/models.dart';
+import 'package:cow_brain/src/utils/string_extensions.dart';
 
 /*
 
@@ -106,42 +107,39 @@ final class Qwen3PromptFormatter implements PromptFormatter {
   String format({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
     required bool enableReasoning,
   }) {
     final buffer = StringBuffer();
     final toolList = tools;
 
-    if (!systemApplied) {
-      if (toolList.isNotEmpty) {
-        buffer.write('<|im_start|>system\n');
-        if (messages.isNotEmpty && messages.first.role == Role.system) {
-          buffer
-            ..write(messages.first.content)
-            ..write('\n\n');
-        }
-        buffer.write(
-          '# Tools\n\nYou may call one or more functions to assist with the '
-          'user query.\n\nYou are provided with function signatures within '
-          '<tools></tools> XML tags:\n<tools>',
-        );
-        for (final tool in toolList) {
-          buffer
-            ..write('\n')
-            ..write(jsonEncode(_toolDeclaration(tool)));
-        }
-        buffer.write(
-          '\n</tools>\n\nFor each function call, return a json object with '
-          'function name and arguments within <tool_call></tool_call> XML tags:'
-          '\n<tool_call>\n{"name": <function-name>, "arguments": '
-          '<args-json-object>}\n</tool_call><|im_end|>\n',
-        );
-      } else if (messages.isNotEmpty && messages.first.role == Role.system) {
+    if (toolList.isNotEmpty) {
+      buffer.write('<|im_start|>system\n');
+      if (messages.isNotEmpty && messages.first.role == Role.system) {
         buffer
-          ..write('<|im_start|>system\n')
           ..write(messages.first.content)
-          ..write('<|im_end|>\n');
+          ..write('\n\n');
       }
+      buffer.write(
+        '# Tools\n\nYou may call one or more functions to assist with the '
+        'user query.\n\nYou are provided with function signatures within '
+        '<tools></tools> XML tags:\n<tools>',
+      );
+      for (final tool in toolList) {
+        buffer
+          ..write('\n')
+          ..write(jsonEncode(_toolDeclaration(tool)));
+      }
+      buffer.write(
+        '\n</tools>\n\nFor each function call, return a json object with '
+        'function name and arguments within <tool_call></tool_call> XML tags:'
+        '\n<tool_call>\n{"name": <function-name>, "arguments": '
+        '<args-json-object>}\n</tool_call><|im_end|>\n',
+      );
+    } else if (messages.isNotEmpty && messages.first.role == Role.system) {
+      buffer
+        ..write('<|im_start|>system\n')
+        ..write(messages.first.content)
+        ..write('<|im_end|>\n');
     }
 
     var lastQueryIndex = messages.length - 1;
@@ -159,9 +157,6 @@ final class Qwen3PromptFormatter implements PromptFormatter {
 
     for (var i = 0; i < messages.length; i += 1) {
       final message = messages[i];
-      if (systemApplied && message.role == Role.system) {
-        continue;
-      }
 
       switch (message.role) {
         case Role.system:
@@ -195,9 +190,9 @@ final class Qwen3PromptFormatter implements PromptFormatter {
               buffer
                 ..write('<|im_start|>${message.role.roleName}\n')
                 ..write('<think>\n')
-                ..write(_stripEdgeNewlines(reasoningContent))
+                ..write(reasoningContent.stripEdgeNewlines())
                 ..write('\n</think>\n\n')
-                ..write(_stripLeadingNewlines(content));
+                ..write(content.stripLeadingNewlines());
             } else {
               buffer
                 ..write('<|im_start|>${message.role.roleName}\n')
@@ -268,18 +263,5 @@ final class Qwen3PromptFormatter implements PromptFormatter {
         'parameters': tool.parameters,
       },
     };
-  }
-
-  static String _stripLeadingNewlines(String value) {
-    return value.replaceFirst(RegExp(r'^\n+'), '');
-  }
-
-  static String _stripEdgeNewlines(String value) {
-    return value
-        .replaceFirst(RegExp(r'^\n+'), '')
-        .replaceFirst(
-          RegExp(r'\n+$'),
-          '',
-        );
   }
 }

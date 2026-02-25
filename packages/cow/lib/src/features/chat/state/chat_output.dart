@@ -105,8 +105,12 @@ final class InitializeBrainsRequested extends ChatOutput {
   const InitializeBrainsRequested({
     required this.models,
     required this.enableReasoning,
+    required this.systemPrompt,
+    required this.summarySystemPrompt,
   });
 
   final Map<BrainRole, LoadedModel> models;
   final bool enableReasoning;
+  final String systemPrompt;
+  final String summarySystemPrompt;
 }

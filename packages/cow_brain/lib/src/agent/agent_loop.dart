@@ -3,12 +3,15 @@
 // ignore_for_file: public_member_api_docs
 
 import 'package:cow_brain/src/agent/agent_runner.dart';
+import 'package:cow_brain/src/agent/step_preparer.dart';
+import 'package:cow_brain/src/agent/turn_emitter.dart';
 import 'package:cow_brain/src/context/context.dart';
 import 'package:cow_brain/src/core/conversation.dart';
 import 'package:cow_brain/src/core/llm_adapter.dart';
 import 'package:cow_brain/src/core/model_output.dart';
 import 'package:cow_brain/src/isolate/models.dart';
 import 'package:cow_brain/src/tools/tool_registry.dart';
+import 'package:cow_brain/src/utils/string_extensions.dart';
 
 final class AgentLoop implements AgentRunner {
   AgentLoop({
@@ -21,11 +24,15 @@ final class AgentLoop implements AgentRunner {
     this.sequenceId = 0,
   }) : _llm = llm,
        _tools = tools,
-       _context = context;
+       _stepPreparer = StepPreparer(
+         contextManager: context,
+         contextSize: contextSize,
+         maxOutputTokens: maxOutputTokens,
+       );
 
   final LlmAdapter _llm;
   final ToolRegistry _tools;
-  final ContextManager _context;
+  final StepPreparer _stepPreparer;
 
   /// Exposed for sequence forking — shared across sequences.
   LlmAdapter get llm => _llm;
@@ -33,15 +40,15 @@ final class AgentLoop implements AgentRunner {
   /// Exposed for sequence forking — shared across sequences.
   ToolRegistry get tools => _tools;
 
+  /// Exposed for sequence forking — new agent loops need a fresh preparer.
+  ContextManager get contextManager => _stepPreparer.contextManager;
+
   @override
   final int contextSize;
   @override
   final int maxOutputTokens;
   final double temperature;
   final int sequenceId;
-
-  // Tracks previous reasoning state to detect toggles requiring context reset.
-  bool? _lastEnableReasoning;
 
   @override
   Stream<AgentEvent> runTurn(
@@ -51,82 +58,30 @@ final class AgentLoop implements AgentRunner {
     int maxSteps = 8,
     bool enableReasoning = true,
   }) async* {
-    final turnId = convo.beginTurn();
-    var steps = 0;
-    var systemApplied = convo.systemApplied;
-    ContextSlice? previousSlice;
-
-    while (steps < maxSteps) {
-      if (shouldCancel?.call() ?? false) {
-        throw const CancelledException();
-      }
-      steps += 1;
-      yield AgentStepStarted(
-        sequenceId: sequenceId,
-        turnId: turnId,
-        step: steps,
-      );
+    final emit = TurnEmitter(
+      sequenceId: sequenceId,
+      turnId: convo.beginTurn(),
+    );
+    while (emit.step < maxSteps) {
+      _throwIfCancelled(shouldCancel);
+      emit.step += 1;
+      yield emit.stepStarted();
 
       final toolDefs = _tools.definitions;
-      var slice = _context.prepare(
+      final prepared = _stepPreparer.prepare(
         messages: convo.messages,
         tools: toolDefs,
-        contextSize: contextSize,
-        maxOutputTokens: maxOutputTokens,
-        systemApplied: systemApplied,
-        previousSlice: previousSlice,
+        enableReasoning: enableReasoning,
       );
+      final slice = prepared.slice;
 
-      var requiresReset = slice.requiresReset;
-      var reusePrefixMessageCount = slice.reusePrefixMessageCount;
-
-      // Force reset if reasoning toggle changed (prompt format differs).
-      if (_lastEnableReasoning != null &&
-          _lastEnableReasoning != enableReasoning) {
-        requiresReset = true;
-        reusePrefixMessageCount = 0;
-      }
-      _lastEnableReasoning = enableReasoning;
-
-      // If the slice is incompatible with the previous one, we need to reset
-      // the native context and ensure the system prompt is re-applied.
-      if (requiresReset && systemApplied) {
-        systemApplied = false;
-        slice = _context.prepare(
-          messages: convo.messages,
-          tools: toolDefs,
-          contextSize: contextSize,
-          maxOutputTokens: maxOutputTokens,
-          systemApplied: systemApplied,
-        );
-        requiresReset = true;
-        reusePrefixMessageCount = 0;
-        previousSlice = null;
+      yield emit.telemetry(slice);
+      if (slice.droppedMessageCount > 0) {
+        yield emit.contextTrimmed(slice.droppedMessageCount);
       }
 
-      previousSlice = slice;
       final remainingTokens = slice.remainingTokens;
       var generatedTokens = 0;
-      yield AgentTelemetryUpdate(
-        sequenceId: sequenceId,
-        turnId: turnId,
-        step: steps,
-        promptTokens: slice.estimatedPromptTokens,
-        budgetTokens: slice.budgetTokens,
-        remainingTokens: slice.remainingTokens,
-        contextSize: slice.contextSize,
-        maxOutputTokens: slice.maxOutputTokens,
-        safetyMarginTokens: slice.safetyMarginTokens,
-      );
-      if (slice.droppedMessageCount > 0) {
-        yield AgentContextTrimmed(
-          sequenceId: sequenceId,
-          turnId: turnId,
-          step: steps,
-          droppedMessageCount: slice.droppedMessageCount,
-        );
-      }
-
       final textBuffer = StringBuffer();
       final reasoningBuffer = StringBuffer();
       final toolCalls = <ToolCall>[];
@@ -136,101 +91,51 @@ final class AgentLoop implements AgentRunner {
         await for (final output in _llm.next(
           messages: slice.messages,
           tools: toolDefs,
-          systemApplied: systemApplied,
           enableReasoning: enableReasoning,
           config: LlmConfig(
             sequenceId: sequenceId,
-            requiresReset: requiresReset,
-            reusePrefixMessageCount: reusePrefixMessageCount,
+            requiresReset: prepared.requiresReset,
+            reusePrefixMessageCount: prepared.reusePrefixMessageCount,
           ),
         )) {
           switch (output) {
             case OutputTextDelta(:final text):
-              var delta = text;
-              if (textBuffer.isEmpty) {
-                delta = _stripLeadingNewline(delta);
+              if (_accumulate(textBuffer, text) case final delta?) {
+                yield emit.textDelta(delta);
               }
-              if (delta.isEmpty) {
-                break;
-              }
-              textBuffer.write(delta);
-              yield AgentTextDelta(
-                sequenceId: sequenceId,
-                turnId: turnId,
-                step: steps,
-                text: delta,
-              );
             case OutputReasoningDelta(:final text):
-              var delta = text;
-              if (reasoningBuffer.isEmpty) {
-                delta = _stripLeadingNewline(delta);
+              if (_accumulate(reasoningBuffer, text) case final delta?) {
+                yield emit.reasoningDelta(delta);
               }
-              if (delta.isEmpty) {
-                break;
-              }
-              reasoningBuffer.write(delta);
-              yield AgentReasoningDelta(
-                sequenceId: sequenceId,
-                turnId: turnId,
-                step: steps,
-                text: delta,
-              );
             case OutputToolCalls(:final calls):
               toolCalls.addAll(calls);
             case OutputTokensGenerated(:final count):
               if (count > 0) {
                 generatedTokens += count;
-                var updatedRemaining = remainingTokens - generatedTokens;
-                if (updatedRemaining < 0) {
-                  updatedRemaining = 0;
-                } else if (updatedRemaining > remainingTokens) {
-                  updatedRemaining = remainingTokens;
-                }
-                yield AgentTelemetryUpdate(
-                  sequenceId: sequenceId,
-                  turnId: turnId,
-                  step: steps,
-                  promptTokens: slice.estimatedPromptTokens,
-                  budgetTokens: slice.budgetTokens,
-                  remainingTokens: updatedRemaining,
-                  contextSize: slice.contextSize,
-                  maxOutputTokens: slice.maxOutputTokens,
-                  safetyMarginTokens: slice.safetyMarginTokens,
+                final updated = (remainingTokens - generatedTokens).clamp(
+                  0,
+                  remainingTokens,
                 );
+                yield emit.telemetry(slice, remainingOverride: updated);
               }
             case OutputStepFinished(:final reason):
               finishReason = reason;
           }
-          if (shouldCancel?.call() ?? false) {
-            throw const CancelledException();
-          }
+          _throwIfCancelled(shouldCancel);
         }
 
         final fullText = textBuffer.toString();
-        final reasoning = reasoningBuffer.toString();
-        final reasoningOrNull = reasoning.isEmpty ? null : reasoning;
-        final textOrNull = fullText.isEmpty ? null : fullText;
-
-        // The system prompt has now been applied to the native context.
-        systemApplied = true;
-        convo.setSystemApplied(value: true);
+        final reasoningOrNull = reasoningBuffer.toStringOrNull();
+        final textOrNull = textBuffer.toStringOrNull();
 
         if (toolCalls.isEmpty) {
           convo.appendAssistantText(fullText, reasoning: reasoningOrNull);
-          yield AgentStepFinished(
-            sequenceId: sequenceId,
-            turnId: turnId,
-            step: steps,
+          yield emit.stepFinished(
             text: fullText,
             reasoning: reasoningOrNull,
             finishReason: finishReason,
           );
-          yield AgentTurnFinished(
-            sequenceId: sequenceId,
-            turnId: turnId,
-            step: steps,
-            finishReason: finishReason,
-          );
+          yield emit.turnFinished(finishReason);
           return;
         }
 
@@ -239,75 +144,46 @@ final class AgentLoop implements AgentRunner {
           preToolText: textOrNull,
           reasoning: reasoningOrNull,
         );
-        yield AgentToolCalls(
-          sequenceId: sequenceId,
-          turnId: turnId,
-          step: steps,
+        yield emit.toolCalls(
           calls: toolCalls,
           preToolText: textOrNull,
           preToolReasoning: reasoningOrNull,
           finishReason: FinishReason.toolCalls,
         );
 
-        if (shouldCancel?.call() ?? false) {
-          throw const CancelledException();
-        }
+        _throwIfCancelled(shouldCancel);
         final executor = toolExecutor ?? _tools.executeAll;
         final results = await executor(toolCalls);
         for (final result in results) {
           convo.appendToolResult(result);
-          yield AgentToolResult(
-            sequenceId: sequenceId,
-            turnId: turnId,
-            step: steps,
-            result: result,
-          );
+          yield emit.toolResult(result);
         }
       } on CancelledException {
-        convo.setSystemApplied(value: systemApplied);
-        yield AgentTurnFinished(
-          sequenceId: sequenceId,
-          turnId: turnId,
-          step: steps,
-          finishReason: FinishReason.cancelled,
-        );
+        yield emit.turnFinished(FinishReason.cancelled);
         return;
       } on Object catch (error) {
-        convo.setSystemApplied(value: systemApplied);
-        yield AgentError(
-          error: error.toString(),
-          sequenceId: sequenceId,
-          turnId: turnId,
-          step: steps,
-        );
-        yield AgentTurnFinished(
-          sequenceId: sequenceId,
-          turnId: turnId,
-          step: steps,
-          finishReason: FinishReason.error,
-        );
+        yield emit.error(error.toString());
+        yield emit.turnFinished(FinishReason.error);
         return;
       }
     }
 
-    yield AgentTurnFinished(
-      sequenceId: sequenceId,
-      turnId: turnId,
-      step: steps,
-      finishReason: FinishReason.maxSteps,
-    );
+    yield emit.turnFinished(FinishReason.maxSteps);
   }
 
-  String _stripLeadingNewline(String value) {
-    var start = 0;
-    while (start < value.length) {
-      final char = value[start];
-      if (char == '\n' || char == '\r') {
-        start += 1;
-      } else {
-        break;
-      }
+  /// Throws [CancelledException] if the cancel callback returns true.
+  static void _throwIfCancelled(bool Function()? shouldCancel) {
+    if (shouldCancel?.call() ?? false) {
+      throw const CancelledException();
     }
-    return start == 0 ? value : value.substring(start);
+  }
+
+  /// Strips leading newlines on first delta, accumulates into [buffer],
+  /// and returns the cleaned delta (or null if empty after stripping).
+  static String? _accumulate(StringBuffer buffer, String text) {
+    final delta = buffer.isEmpty ? text.stripLeadingNewlines() : text;
+    if (delta.isEmpty) return null;
+    buffer.write(delta);
+    return delta;
   }
 }

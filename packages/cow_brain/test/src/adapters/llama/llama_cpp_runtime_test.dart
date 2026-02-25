@@ -5,6 +5,7 @@ import 'dart:collection';
 import 'dart:ffi';
 import 'dart:typed_data';
 
+import 'package:cow_brain/src/adapters/chunked_utf8.dart';
 import 'package:cow_brain/src/adapters/llama/llama.dart';
 import 'package:cow_brain/src/adapters/stream_chunk.dart';
 import 'package:cow_brain/src/isolate/models.dart';
@@ -279,7 +280,10 @@ void main() {
 
         final count = runtime.countTokens('next', addBos: true);
         expect(count, 1);
-        expect(client.addSpecialCalls, [true, false]);
+        // countTokens always counts conservatively (addSpecial: true) to avoid
+        // underestimating the budget. The per-sequence BOS state only affects
+        // generate(), not budget estimation.
+        expect(client.addSpecialCalls, [true, true]);
 
         runtime.dispose();
         expect(() => runtime.countTokens('x', addBos: true), throwsStateError);
@@ -367,7 +371,7 @@ void main() {
 
     test('chunked string sink writes all and writeln', () {
       final chunks = <String>[];
-      final sink = llamaChunkedStringSink(chunks);
+      final sink = ChunkedStringSink(chunks);
       sink.writeAll([1, null, 'b'], ',');
       sink.writeln('x');
       sink.writeln();
@@ -881,8 +885,8 @@ void main() {
             )
             .toList();
 
-        // First call decoded [10, 20, 30] in one batch.
-        expect(client.decodedTokenLists.first, [10, 20, 30]);
+        // Prefill decoded [10, 20, 30] across two batches (non-final + final).
+        expect(client.allDecodedTokens, [10, 20, 30]);
         client.decodedTokenLists.clear();
         client.decodeCalls = 0;
 
@@ -899,7 +903,7 @@ void main() {
             .toList();
 
         // Should only decode the new suffix [40, 50], not the full prompt.
-        expect(client.decodedTokenLists.first, [40, 50]);
+        expect(client.allDecodedTokens, [40, 50]);
       });
 
       test('trims KV cache when prompt diverges from cached tokens', () async {
@@ -965,7 +969,7 @@ void main() {
         expect(trimCall.$4, 3); // p1 = posMax + 1
 
         // Should only decode the diverged suffix [77, 88].
-        expect(client.decodedTokenLists.first, [77, 88]);
+        expect(client.allDecodedTokens, [77, 88]);
       });
 
       test('tracks generated tokens for prefix matching', () async {
@@ -1081,7 +1085,7 @@ void main() {
             .toList();
 
         // Full prompt re-decoded despite matching tokens.
-        expect(client.decodedTokenLists.first, [10, 20, 30]);
+        expect(client.allDecodedTokens, [10, 20, 30]);
       });
 
       test('skips decode when prompt exactly matches cached tokens', () async {
@@ -1218,10 +1222,7 @@ void main() {
           // _ensureRoomFor: 8 existing + 2 new + 4 out = 14 > 12
           // drops 2 from front → cachedTokens trimmed partially.
           // Then decodes [50, 60].
-          expect(
-            client.decodedTokenLists.first,
-            [50, 60],
-          );
+          expect(client.allDecodedTokens, [50, 60]);
         },
       );
     });
@@ -1381,9 +1382,8 @@ void main() {
 
       runtime.forkSequence(source: 0, target: 1);
 
-      expect(bindings.memorySeqCpCalls, 1);
-      expect(bindings.lastMemorySeqCpArgs?.$2, 0); // source
-      expect(bindings.lastMemorySeqCpArgs?.$3, 1); // target
+      // No seq_cp call — re-prefill happens on next generate() instead.
+      expect(bindings.memorySeqCpCalls, 0);
     });
 
     test('forkSequence throws when target already exists', () {
@@ -1412,6 +1412,14 @@ void main() {
         () => runtime.forkSequence(source: 0, target: 1),
         throwsStateError,
       );
+    });
+
+    test('SequenceState.trimCacheTo is a no-op when length >= cache size', () {
+      final state = SequenceState()..cachedTokens = [1, 2, 3];
+      state.trimCacheTo(5);
+      expect(state.cachedTokens, [1, 2, 3]);
+      state.trimCacheTo(3);
+      expect(state.cachedTokens, [1, 2, 3]);
     });
 
     test('forkSequence throws when source does not exist', () {
@@ -1455,6 +1463,10 @@ final class FakeClient implements LlamaClientApi {
   int decodeCalls = 0;
   int disposeCalls = 0;
   final List<List<int>> decodedTokenLists = [];
+
+  /// All decoded tokens across all decodeBatch calls, flattened.
+  List<int> get allDecodedTokens => decodedTokenLists.expand((l) => l).toList();
+
   Pointer<llama_context> createContextResult = Pointer.fromAddress(2);
   Pointer<llama_context> initialContext = Pointer.fromAddress(2);
 
@@ -1486,8 +1498,9 @@ final class FakeClient implements LlamaClientApi {
   @override
   void resetContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  ) {
+    LlamaContextOptions options, {
+    required int maxSequences,
+  }) {
     resetCalls += 1;
   }
 

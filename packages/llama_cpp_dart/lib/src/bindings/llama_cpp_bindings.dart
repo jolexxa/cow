@@ -2643,6 +2643,21 @@ class LlamaCppBindings {
   late final _ggml_is_empty = _ggml_is_emptyPtr
       .asFunction<bool Function(ffi.Pointer<ggml_tensor>)>();
 
+  bool ggml_is_view(
+    ffi.Pointer<ggml_tensor> tensor,
+  ) {
+    return _ggml_is_view(
+      tensor,
+    );
+  }
+
+  late final _ggml_is_viewPtr =
+      _lookup<ffi.NativeFunction<ffi.Bool Function(ffi.Pointer<ggml_tensor>)>>(
+        'ggml_is_view',
+      );
+  late final _ggml_is_view = _ggml_is_viewPtr
+      .asFunction<bool Function(ffi.Pointer<ggml_tensor>)>();
+
   bool ggml_is_scalar(
     ffi.Pointer<ggml_tensor> tensor,
   ) {
@@ -16032,6 +16047,23 @@ class LlamaCppBindings {
             )
           >();
 
+  void ggml_backend_cpu_set_use_ref(
+    ggml_backend_t backend_cpu,
+    bool use_ref,
+  ) {
+    return _ggml_backend_cpu_set_use_ref(
+      backend_cpu,
+      use_ref,
+    );
+  }
+
+  late final _ggml_backend_cpu_set_use_refPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ggml_backend_t, ffi.Bool)>>(
+        'ggml_backend_cpu_set_use_ref',
+      );
+  late final _ggml_backend_cpu_set_use_ref = _ggml_backend_cpu_set_use_refPtr
+      .asFunction<void Function(ggml_backend_t, bool)>();
+
   ggml_backend_reg_t ggml_backend_cpu_reg() {
     return _ggml_backend_cpu_reg();
   }
@@ -18513,80 +18545,42 @@ class LlamaCppBindings {
             ffi.Pointer<llama_token> Function(ffi.Pointer<llama_adapter_lora>)
           >();
 
-  int llama_set_adapter_lora(
+  int llama_set_adapters_lora(
     ffi.Pointer<llama_context> ctx,
-    ffi.Pointer<llama_adapter_lora> adapter,
-    double scale,
+    ffi.Pointer<ffi.Pointer<llama_adapter_lora>> adapters,
+    int n_adapters,
+    ffi.Pointer<ffi.Float> scales,
   ) {
-    return _llama_set_adapter_lora(
+    return _llama_set_adapters_lora(
       ctx,
-      adapter,
-      scale,
+      adapters,
+      n_adapters,
+      scales,
     );
   }
 
-  late final _llama_set_adapter_loraPtr =
+  late final _llama_set_adapters_loraPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int32 Function(
             ffi.Pointer<llama_context>,
-            ffi.Pointer<llama_adapter_lora>,
-            ffi.Float,
+            ffi.Pointer<ffi.Pointer<llama_adapter_lora>>,
+            ffi.Size,
+            ffi.Pointer<ffi.Float>,
           )
         >
-      >('llama_set_adapter_lora');
-  late final _llama_set_adapter_lora = _llama_set_adapter_loraPtr
+      >('llama_set_adapters_lora');
+  late final _llama_set_adapters_lora = _llama_set_adapters_loraPtr
       .asFunction<
         int Function(
           ffi.Pointer<llama_context>,
-          ffi.Pointer<llama_adapter_lora>,
-          double,
+          ffi.Pointer<ffi.Pointer<llama_adapter_lora>>,
+          int,
+          ffi.Pointer<ffi.Float>,
         )
       >();
 
-  int llama_rm_adapter_lora(
-    ffi.Pointer<llama_context> ctx,
-    ffi.Pointer<llama_adapter_lora> adapter,
-  ) {
-    return _llama_rm_adapter_lora(
-      ctx,
-      adapter,
-    );
-  }
-
-  late final _llama_rm_adapter_loraPtr =
-      _lookup<
-        ffi.NativeFunction<
-          ffi.Int32 Function(
-            ffi.Pointer<llama_context>,
-            ffi.Pointer<llama_adapter_lora>,
-          )
-        >
-      >('llama_rm_adapter_lora');
-  late final _llama_rm_adapter_lora = _llama_rm_adapter_loraPtr
-      .asFunction<
-        int Function(
-          ffi.Pointer<llama_context>,
-          ffi.Pointer<llama_adapter_lora>,
-        )
-      >();
-
-  void llama_clear_adapter_lora(
-    ffi.Pointer<llama_context> ctx,
-  ) {
-    return _llama_clear_adapter_lora(
-      ctx,
-    );
-  }
-
-  late final _llama_clear_adapter_loraPtr =
-      _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<llama_context>)>
-      >('llama_clear_adapter_lora');
-  late final _llama_clear_adapter_lora = _llama_clear_adapter_loraPtr
-      .asFunction<void Function(ffi.Pointer<llama_context>)>();
-
-  int llama_apply_adapter_cvec(
+  int llama_set_adapter_cvec(
     ffi.Pointer<llama_context> ctx,
     ffi.Pointer<ffi.Float> data,
     int len,
@@ -18594,7 +18588,7 @@ class LlamaCppBindings {
     int il_start,
     int il_end,
   ) {
-    return _llama_apply_adapter_cvec(
+    return _llama_set_adapter_cvec(
       ctx,
       data,
       len,
@@ -18604,7 +18598,7 @@ class LlamaCppBindings {
     );
   }
 
-  late final _llama_apply_adapter_cvecPtr =
+  late final _llama_set_adapter_cvecPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int32 Function(
@@ -18616,8 +18610,8 @@ class LlamaCppBindings {
             ffi.Int32,
           )
         >
-      >('llama_apply_adapter_cvec');
-  late final _llama_apply_adapter_cvec = _llama_apply_adapter_cvecPtr
+      >('llama_set_adapter_cvec');
+  late final _llama_set_adapter_cvec = _llama_set_adapter_cvecPtr
       .asFunction<
         int Function(
           ffi.Pointer<llama_context>,
@@ -20703,9 +20697,9 @@ class LlamaCppBindings {
       >();
 
   /// Apply chat template. Inspired by hf apply_chat_template() on python.
-  /// Both "model" and "custom_template" are optional, but at least one is required. "custom_template" has higher precedence than "model"
+  ///
   /// NOTE: This function does not use a jinja parser. It only support a pre-defined list of template. See more: https://github.com/ggml-org/llama.cpp/wiki/Templates-supported-by-llama_chat_apply_template
-  /// @param tmpl A Jinja template to use for this chat. If this is nullptr, the model’s default chat template will be used instead.
+  /// @param tmpl A Jinja template to use for this chat.
   /// @param chat Pointer to a list of multiple llama_chat_message
   /// @param n_msg Number of llama_chat_message in this chat
   /// @param add_ass Whether to end the prompt with the token(s) that indicate the start of an assistant message.
@@ -21686,12 +21680,12 @@ class LlamaCppBindings {
   late final _llama_split_pathPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Int Function(
+          ffi.Int32 Function(
             ffi.Pointer<ffi.Char>,
             ffi.Size,
             ffi.Pointer<ffi.Char>,
-            ffi.Int,
-            ffi.Int,
+            ffi.Int32,
+            ffi.Int32,
           )
         >
       >('llama_split_path');
@@ -21727,12 +21721,12 @@ class LlamaCppBindings {
   late final _llama_split_prefixPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Int Function(
+          ffi.Int32 Function(
             ffi.Pointer<ffi.Char>,
             ffi.Size,
             ffi.Pointer<ffi.Char>,
-            ffi.Int,
-            ffi.Int,
+            ffi.Int32,
+            ffi.Int32,
           )
         >
       >('llama_split_prefix');
@@ -23399,6 +23393,9 @@ final class ggml_cplan extends ffi.Struct {
   external ggml_abort_callback abort_callback;
 
   external ffi.Pointer<ffi.Void> abort_callback_data;
+
+  @ffi.Bool()
+  external bool use_ref;
 }
 
 enum ggml_numa_strategy {
@@ -24353,6 +24350,9 @@ final class llama_model_quantize_params extends ffi.Struct {
 
   @ffi.Bool()
   external bool keep_split;
+
+  @ffi.Bool()
+  external bool dry_run;
 
   external ffi.Pointer<ffi.Void> imatrix;
 
@@ -25564,7 +25564,7 @@ const String __AVAILABILITY_VERSIONS_VERSION_STRING = 'Local';
 
 const String __AVAILABILITY_FILE = 'AvailabilityVersions.h';
 
-const int __MAC_OS_X_VERSION_MIN_REQUIRED = 150000;
+const int __MAC_OS_X_VERSION_MIN_REQUIRED = 260000;
 
 const int __MAC_OS_X_VERSION_MAX_ALLOWED = 260200;
 

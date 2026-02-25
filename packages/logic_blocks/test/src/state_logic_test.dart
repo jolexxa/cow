@@ -280,6 +280,43 @@ void main() {
       });
     });
 
+    group('onAny fallback handler', () {
+      test('onAny fires for unhandled input types', () {
+        final logic = OnAnyLogicBlock();
+        final outputs = <Object>[];
+        final binding = logic.bind();
+        binding.onOutput<OutputA>(outputs.add);
+
+        logic.start();
+        outputs.clear(); // ignore enter outputs
+
+        // UnregisteredInput has no specific handler → onAny should fire
+        logic.input(const UnregisteredInput());
+
+        expect(outputs, hasLength(1));
+        binding.dispose();
+      });
+
+      test('specific on<T> takes priority over onAny', () {
+        final logic = OnAnyLogicBlock();
+        logic.start();
+
+        // GoToB has a specific handler → should go to StateB, not hit onAny
+        logic.input(const GoToB());
+
+        expect(logic.value, isA<StateB>());
+      });
+
+      test('onAny with FakeContext', () {
+        final state = OnAnyState();
+        final ctx = state.createFakeContext();
+
+        final t = state.handleInput(const UnregisteredInput());
+        expect(t.stateType, OnAnyState);
+        expect(ctx.outputs, hasLength(1));
+      });
+    });
+
     group('addError via FakeContext', () {
       test('addError records error in FakeContext', () {
         final state = StateA();

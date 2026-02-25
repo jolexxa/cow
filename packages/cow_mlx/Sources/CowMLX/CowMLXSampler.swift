@@ -45,15 +45,16 @@ struct CustomSampler: LogitSampler {
             let vocabSize = logits.dim(-1)
             let k = min(topK, vocabSize)
             let sorted = MLX.sorted(logits, axis: -1)
-            // Index the vocab axis (last), not the batch axis.
-            let threshold = sorted[0..., vocabSize - k]
+            // Keep dims so threshold is [B, 1] for broadcast with [B, V].
+            let threshold = sorted[0..., vocabSize - k].expandedDimensions(axis: -1)
             logits = MLX.where(logits .>= threshold, logits, MLXArray(Float(-1e9)))
         }
 
         // Min-P filtering.
         if minP > 0 {
             let probs = softmax(logits, axis: -1)
-            let maxProb = probs.max(axis: -1)
+            // keepDims so maxProb is [B, 1] for broadcast with [B, V].
+            let maxProb = probs.max(axis: -1, keepDims: true)
             let threshold = maxProb * minP
             logits = MLX.where(probs .>= threshold, logits, MLXArray(Float(-1e9)))
         }
@@ -63,14 +64,21 @@ struct CustomSampler: LogitSampler {
 
         return withRandomState(randomState) {
             if topP > 0 && topP < 1.0 {
-                let probs = softmax(scaled, axis: -1)
-                let sortedIndices = argSort(probs, axis: -1)
-                let sortedProbs = take(probs, sortedIndices, axis: -1).squeezed(axis: 0)
-                let cumProbs = cumsum(sortedProbs, axis: -1)
-                let topProbs = MLX.where(
-                    cumProbs .> (1 - topP), sortedProbs, zeros(like: sortedProbs))
-                let sortedToken = categorical(log(topProbs))
-                return sortedIndices.squeezed(axis: 0)[sortedToken]
+                // Sample per-row to avoid advanced indexing issues with batch.
+                let B = scaled.dim(0)
+                var results = [MLXArray]()
+                for i in 0 ..< B {
+                    let row = scaled[i]  // [V]
+                    let probs = softmax(row)
+                    let sortedIndices = argSort(probs, axis: -1)
+                    let sortedProbs = take(probs, sortedIndices, axis: -1)
+                    let cumProbs = cumsum(sortedProbs, axis: -1)
+                    let topProbs = MLX.where(
+                        cumProbs .> (1 - topP), sortedProbs, zeros(like: sortedProbs))
+                    let sortedToken = categorical(log(topProbs))
+                    results.append(sortedIndices[sortedToken])
+                }
+                return stacked(results)
             } else {
                 return categorical(scaled)
             }

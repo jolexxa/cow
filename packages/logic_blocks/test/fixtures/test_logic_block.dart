@@ -227,6 +227,64 @@ final class GetDuringInputLogicBlock extends LogicBlock<TestLogicBlockState> {
   Transition getInitialState() => to<GetDuringInputState>();
 }
 
+/// State that uses onAny as a fallback handler.
+final class OnAnyState extends TestLogicBlockState {
+  OnAnyState() {
+    on<GoToB>((input) => to<StateB>());
+    onAny((_) {
+      output(const OutputA());
+      return toSelf();
+    });
+  }
+}
+
+/// Logic block that starts in OnAnyState.
+final class OnAnyLogicBlock extends LogicBlock<TestLogicBlockState> {
+  OnAnyLogicBlock() {
+    set(OnAnyState());
+    set(StateB());
+  }
+
+  @override
+  Transition getInitialState() => to<OnAnyState>();
+}
+
+// -- Async test fixtures --
+
+final class AsyncSuccessInput {
+  const AsyncSuccessInput(this.data);
+  final String data;
+}
+
+final class AsyncErrorInput {
+  const AsyncErrorInput(this.error);
+  final Object error;
+}
+
+/// State that exposes async() for testing.
+final class AsyncState extends TestLogicBlockState {
+  AsyncState() {
+    on<GoToB>((input) => to<StateB>());
+    on<AsyncSuccessInput>((_) => toSelf());
+    on<AsyncErrorInput>((_) => toSelf());
+  }
+
+  @override
+  StatefulFuture<T> async<T>(Future<T> future) => super.async<T>(future);
+}
+
+/// Logic block that starts in AsyncState.
+final class AsyncLogicBlock extends LogicBlock<TestLogicBlockState> {
+  AsyncLogicBlock() {
+    set(AsyncState());
+    set(StateA());
+    set(StateB());
+  }
+
+  @override
+  Transition getInitialState() => to<AsyncState>();
+}
+
 /// A different LogicBlock subclass for operator== tests.
 final class AltTestLogicBlock extends LogicBlock<TestLogicBlockState> {
   AltTestLogicBlock() {

@@ -424,8 +424,9 @@ final class FakeLlamaClient implements LlamaClientApi {
   @override
   void resetContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  ) {}
+    LlamaContextOptions options, {
+    required int maxSequences,
+  }) {}
 }
 
 final class _NoopBindings implements LlamaBindings {

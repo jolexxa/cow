@@ -35,6 +35,7 @@ void main() {
           ],
           settings: _settings,
           enableReasoning: true,
+          systemPrompt: 'You are a test assistant.',
         ),
       );
 
@@ -59,6 +60,7 @@ void main() {
           tools: <ToolDefinition>[],
           settings: _settings,
           enableReasoning: false,
+          systemPrompt: 'You are a test assistant.',
         ),
       );
 

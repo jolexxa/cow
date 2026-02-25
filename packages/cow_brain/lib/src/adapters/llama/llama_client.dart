@@ -32,8 +32,9 @@ abstract class LlamaClientApi {
 
   void resetContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  );
+    LlamaContextOptions options, {
+    required int maxSequences,
+  });
 
   Pointer<llama_context> createContext(
     LlamaHandles handles,
@@ -174,10 +175,15 @@ final class LlamaClient implements LlamaClientApi {
   @override
   void resetContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  ) {
+    LlamaContextOptions options, {
+    required int maxSequences,
+  }) {
     freeContext(handles);
-    handles.context = createContext(handles, options);
+    handles.context = createContext(
+      handles,
+      options,
+      maxSequences: maxSequences,
+    );
     if (handles.context == nullptr) {
       throw StateError('Failed to create context');
     }

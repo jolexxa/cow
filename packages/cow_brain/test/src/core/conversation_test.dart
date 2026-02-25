@@ -21,16 +21,6 @@ void main() {
       expect(conversation.beginTurn(), 'turn-2');
     });
 
-    test('systemApplied can be toggled explicitly', () {
-      final conversation = Conversation.initial();
-
-      expect(conversation.systemApplied, isFalse);
-      conversation.setSystemApplied(value: true);
-      expect(conversation.systemApplied, isTrue);
-      conversation.setSystemApplied(value: false);
-      expect(conversation.systemApplied, isFalse);
-    });
-
     test('addUser rejects empty content', () {
       final conversation = Conversation.initial();
 
@@ -94,7 +84,6 @@ void main() {
 
     test('copy creates an independent deep copy', () {
       final original = Conversation.initial(systemPrompt: 'sys')
-        ..setSystemApplied(value: true)
         ..addUser('hello')
         ..beginTurn();
 
@@ -102,7 +91,6 @@ void main() {
 
       // Same messages.
       expect(copied.messages.length, original.messages.length);
-      expect(copied.systemApplied, isTrue);
 
       // Independent — mutating copy doesn't affect original.
       copied.addUser('world');

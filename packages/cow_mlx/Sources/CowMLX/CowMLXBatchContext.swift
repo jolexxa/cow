@@ -24,7 +24,7 @@ final class CowMLXBatchContext: @unchecked Sendable {
     let model: CowMLXModel
     let maxTokens: Int32
 
-    /// Per-layer batch KV caches (BatchKVCache or BatchRotatingKVCache).
+    /// Per-layer batch KV caches.
     var cache: [KVCache]?
 
     /// Active sequences in the batch, in order.
@@ -90,7 +90,7 @@ final class CowMLXBatchContext: @unchecked Sendable {
         let paddedArray = MLXArray(padded.flatMap { $0 }, [prompts.count, maxLen])
 
         // Create batch caches.
-        var batchCache = makeBatchCache(
+        let batchCache = makeBatchCache(
             model: model,
             leftPadding: leftPadding
         )
@@ -150,31 +150,18 @@ final class CowMLXBatchContext: @unchecked Sendable {
             return []
         }
 
-        // Build batched input [B, 1] from each sequence's last token.
-        let batchedTokens = MLXArray(
-            sequences.map { $0.lastToken.item(Int32.self) },
-            [sequences.count, 1]
-        )
-
-        // Model forward pass.
-        let logits = batchModelForward(languageModel, batchedTokens, cache: cache)
-        let selected = logits[0..., -1, 0...]  // [B, V]
-        let sampled = sampler.sample(logits: selected)  // [B]
-        asyncEval(sampled)
-
-        // Build results and update state.
-        var results: [(id: Int32, tokenId: Int, bytes: [UInt8])] = []
-
         guard let tokenizer = model.cachedTokenizer else {
-            return results
+            return []
         }
 
+        // Capture the CURRENT lastToken results before advancing.
+        // lastToken was sampled during prefill (or the previous step) but
+        // its bytes were never returned — this is the token we owe the caller.
+        var results: [(id: Int32, tokenId: Int, bytes: [UInt8])] = []
         for i in sequences.indices {
-            let tokenId = sampled[i].item(Int.self)
-            sequences[i].lastToken = sampled[i]
+            let tokenId = sequences[i].lastToken.item(Int.self)
             sequences[i].tokens.append(tokenId)
 
-            // Convert token to bytes.
             if let tokenString = tokenizer.convertIdToToken(tokenId) {
                 let bytes = tokenStringToBytes(
                     tokenString, decoderType: model.decoderType)
@@ -182,6 +169,22 @@ final class CowMLXBatchContext: @unchecked Sendable {
             } else {
                 results.append((id: sequences[i].id, tokenId: tokenId, bytes: []))
             }
+        }
+
+        // Now advance: feed current lastToken to model, sample the NEXT token,
+        // and store it for the next call.
+        let batchedTokens = MLXArray(
+            sequences.map { $0.lastToken.item(Int32.self) },
+            [sequences.count, 1]
+        )
+
+        let logits = batchModelForward(languageModel, batchedTokens, cache: cache)
+        let selected = logits[0..., -1, 0...]  // [B, V]
+        let sampled = sampler.sample(logits: selected)  // [B]
+        asyncEval(sampled)
+
+        for i in sequences.indices {
+            sequences[i].lastToken = sampled[i]
         }
 
         return results
@@ -213,8 +216,6 @@ final class CowMLXBatchContext: @unchecked Sendable {
             switch cache[i] {
             case let batch as BatchKVCache:
                 batch.filter(batchIndices: keepIndices)
-            case let rotating as BatchRotatingKVCache:
-                rotating.filter(batchIndices: keepIndices)
             case let arrays as ArraysCache:
                 arrays.filter(batchIndices: keepIndices)
             case let list as CacheList:
@@ -245,8 +246,6 @@ final class CowMLXBatchContext: @unchecked Sendable {
         for i in existingCache.indices {
             switch (existingCache[i], newCache[i]) {
             case (let lhs as BatchKVCache, let rhs as BatchKVCache):
-                lhs.extend(other: rhs)
-            case (let lhs as BatchRotatingKVCache, let rhs as BatchRotatingKVCache):
                 lhs.extend(other: rhs)
             case (let lhs as ArraysCache, let rhs as ArraysCache):
                 lhs.extend(other: rhs)
