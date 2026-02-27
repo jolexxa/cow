@@ -147,7 +147,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: cow-${{ matrix.platform }}
           path: dist/cow-${{ matrix.platform }}.${{ matrix.archive }}
