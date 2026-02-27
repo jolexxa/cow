@@ -1,5 +1,8 @@
 part of 'logic_block.dart';
 
+/// Callback that maps a data of type [TData] to an input of type [TInput].
+typedef InputReturnCallback<TInput> = TInput Function<TData>(TData data);
+
 /// Callback invoked when an input of type [TInput] is received.
 typedef InputCallback<TInput> = void Function(TInput input);
 

@@ -1,6 +1,8 @@
 // For clarity.
 // ignore_for_file: cascade_invocations
 
+import 'dart:async';
+
 import 'package:logic_blocks/logic_blocks.dart';
 import 'package:test/test.dart';
 
@@ -88,6 +90,34 @@ void main() {
 
     test('hashCode does not throw', () {
       expect(() => ctx.hashCode, returnsNormally);
+    });
+
+    test('task is completed when nothing is tracked', () {
+      expect(ctx.task, completion(isNull));
+    });
+
+    test('trackFuture tracks a future', () async {
+      final completer = Completer<void>();
+      ctx.trackFuture(completer.future);
+
+      var done = false;
+      unawaited(ctx.task.then((_) => done = true));
+      expect(done, isFalse);
+
+      completer.complete();
+      await ctx.task;
+      expect(done, isTrue);
+    });
+
+    test('reset completes pending tracked futures', () async {
+      final completer = Completer<void>();
+      ctx.trackFuture(completer.future);
+
+      ctx.reset();
+      await ctx.task;
+
+      // Clean up.
+      completer.complete();
     });
   });
 }

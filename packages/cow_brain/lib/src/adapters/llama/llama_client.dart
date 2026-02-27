@@ -32,23 +32,41 @@ abstract class LlamaClientApi {
 
   void resetContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  );
+    LlamaContextOptions options, {
+    required int maxSequences,
+  });
 
   Pointer<llama_context> createContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  );
+    LlamaContextOptions options, {
+    int maxSequences = 1,
+  });
 
   void decode(
     LlamaHandles handles,
     Pointer<llama_context> context,
-    List<int> tokens,
+    List<int> tokens, {
+    int sequenceId = 0,
+  });
+
+  /// Decode a batch of tokens with explicit per-token sequence/position/logit
+  /// control. Used for GPU batching across multiple sequences.
+  void decodeBatch(
+    LlamaHandles handles,
+    Pointer<llama_context> context,
+    List<({int token, int pos, int seqId, bool logits})> entries,
   );
 
   int sampleNext(
     LlamaHandles handles,
     LlamaSamplerChain sampler,
+  );
+
+  /// Sample from a specific batch index after a batched decode.
+  int sampleAt(
+    LlamaHandles handles,
+    LlamaSamplerChain sampler,
+    int batchIndex,
   );
 
   Uint8List tokenToBytes(
@@ -143,18 +161,29 @@ final class LlamaClient implements LlamaClientApi {
   @override
   Pointer<llama_context> createContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  ) {
-    return _createContext(handles.bindings, handles.model, options);
+    LlamaContextOptions options, {
+    int maxSequences = 1,
+  }) {
+    return _createContext(
+      handles.bindings,
+      handles.model,
+      options,
+      maxSequences: maxSequences,
+    );
   }
 
   @override
   void resetContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  ) {
+    LlamaContextOptions options, {
+    required int maxSequences,
+  }) {
     freeContext(handles);
-    handles.context = createContext(handles, options);
+    handles.context = createContext(
+      handles,
+      options,
+      maxSequences: maxSequences,
+    );
     if (handles.context == nullptr) {
       throw StateError('Failed to create context');
     }
@@ -288,24 +317,54 @@ final class LlamaClient implements LlamaClientApi {
   void decode(
     LlamaHandles handles,
     Pointer<llama_context> context,
-    List<int> tokens,
-  ) {
-    if (tokens.isEmpty) {
-      return;
-    }
+    List<int> tokens, {
+    int sequenceId = 0,
+  }) {
+    if (tokens.isEmpty) return;
     final b = handles.bindings;
-    final tokenCount = tokens.length;
-    final tokenPtr = calloc<llama_token>(tokenCount);
-    for (var i = 0; i < tokenCount; i += 1) {
-      tokenPtr[i] = tokens[i];
+    final mem = b.llama_get_memory(context);
+    final posMax = b.llama_memory_seq_pos_max(mem, sequenceId);
+    final pos = posMax + 1;
+
+    final entries = <({int token, int pos, int seqId, bool logits})>[];
+    for (var i = 0; i < tokens.length; i++) {
+      entries.add((
+        token: tokens[i],
+        pos: pos + i,
+        seqId: sequenceId,
+        logits: i == tokens.length - 1,
+      ));
     }
+    decodeBatch(handles, context, entries);
+  }
 
-    final batch = b.llama_batch_get_one(tokenPtr, tokenCount);
-    final rc = b.llama_decode(context, batch);
-    calloc.free(tokenPtr);
+  @override
+  void decodeBatch(
+    LlamaHandles handles,
+    Pointer<llama_context> context,
+    List<({int token, int pos, int seqId, bool logits})> entries,
+  ) {
+    if (entries.isEmpty) return;
+    final b = handles.bindings;
+    final batch = b.llama_batch_init(entries.length, 0, 1);
 
-    if (rc != 0) {
-      throw StateError('llama_decode failed with code $rc');
+    try {
+      for (var i = 0; i < entries.length; i++) {
+        final e = entries[i];
+        batch.token[i] = e.token;
+        batch.pos[i] = e.pos;
+        batch.n_seq_id[i] = 1;
+        batch.seq_id[i][0] = e.seqId;
+        batch.logits[i] = e.logits ? 1 : 0;
+      }
+      batch.n_tokens = entries.length;
+
+      final rc = b.llama_decode(context, batch);
+      if (rc != 0) {
+        throw StateError('llama_decode failed with code $rc');
+      }
+    } finally {
+      b.llama_batch_free(batch);
     }
   }
 
@@ -315,6 +374,15 @@ final class LlamaClient implements LlamaClientApi {
     LlamaSamplerChain sampler,
   ) {
     return sampler.sample(handles.context);
+  }
+
+  @override
+  int sampleAt(
+    LlamaHandles handles,
+    LlamaSamplerChain sampler,
+    int batchIndex,
+  ) {
+    return sampler.sampleAt(handles.context, batchIndex);
   }
 }
 
@@ -384,6 +452,10 @@ final class LlamaSamplerChain {
     return _bindings.llama_sampler_sample(_sampler, ctx, -1);
   }
 
+  int sampleAt(Pointer<llama_context> ctx, int idx) {
+    return _bindings.llama_sampler_sample(_sampler, ctx, idx);
+  }
+
   void dispose() {
     _bindings.llama_sampler_free(_sampler);
   }
@@ -392,13 +464,15 @@ final class LlamaSamplerChain {
 Pointer<llama_context> _createContext(
   LlamaBindings b,
   Pointer<llama_model> model,
-  LlamaContextOptions contextOptions,
-) {
+  LlamaContextOptions contextOptions, {
+  int maxSequences = 1,
+}) {
   final ctxParams = b.llama_context_default_params()
     ..n_ctx = contextOptions.contextSize
     ..n_batch = contextOptions.nBatch
     ..n_threads = contextOptions.nThreads
-    ..n_threads_batch = contextOptions.nThreadsBatch;
+    ..n_threads_batch = contextOptions.nThreadsBatch
+    ..n_seq_max = maxSequences;
   if (contextOptions.useFlashAttn != null) {
     ctxParams.flash_attn_typeAsInt = contextOptions.useFlashAttn!
         ? llama_flash_attn_type.LLAMA_FLASH_ATTN_TYPE_ENABLED.value

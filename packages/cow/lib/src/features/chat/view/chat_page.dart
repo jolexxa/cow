@@ -25,7 +25,9 @@ class ChatPageView extends StatelessComponent {
         final lightweightBrain = brains.create(ChatCubit.lightweightBrainKey);
         final summaryBrain = SummaryBrain(brain: lightweightBrain);
         final chatData = ChatData()
-          ..enableReasoning = appInfo.modelProfile.supportsReasoning;
+          ..enableReasoning = appInfo.modelProfile.supportsReasoning
+          ..systemPrompt = appInfo.systemPrompt
+          ..summarySystemPrompt = appInfo.summarySystemPrompt;
         final summaryLogic = SummaryLogic(chatData: chatData);
         final toolExecutor = ToolExecutor(
           toolRegistry: appInfo.toolRegistry,

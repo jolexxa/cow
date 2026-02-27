@@ -22,23 +22,21 @@ final class Conversation {
   }
 
   final List<Message> _messages;
-  var _systemApplied = false;
   var _turnCounter = 0;
   late final UnmodifiableListView<Message> _messagesView = UnmodifiableListView(
     _messages,
   );
 
   List<Message> get messages => _messagesView;
-  bool get systemApplied => _systemApplied;
+
+  /// Create a deep copy of this conversation (for sequence forking).
+  Conversation copy() {
+    return Conversation._(List.of(_messages)).._turnCounter = _turnCounter;
+  }
 
   String beginTurn() {
     _turnCounter += 1;
     return 'turn-$_turnCounter';
-  }
-
-  Conversation setSystemApplied({required bool value}) {
-    _systemApplied = value;
-    return this;
   }
 
   Conversation addUser(String content, {String? name}) {

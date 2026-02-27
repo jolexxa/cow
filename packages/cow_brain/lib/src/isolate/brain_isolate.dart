@@ -4,11 +4,14 @@
 import 'dart:async';
 import 'dart:isolate';
 
+import 'package:cow_brain/src/adapters/inference_adapter.dart';
 import 'package:cow_brain/src/adapters/llama/llama.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx.dart';
+import 'package:cow_brain/src/agent/agent_loop.dart';
 import 'package:cow_brain/src/agent/agent_runner.dart';
 import 'package:cow_brain/src/agent/agent_setup.dart';
 import 'package:cow_brain/src/context/context.dart';
+import 'package:cow_brain/src/context/context_manager.dart';
 import 'package:cow_brain/src/core/conversation.dart';
 import 'package:cow_brain/src/core/llm_adapter.dart';
 import 'package:cow_brain/src/core/model_output.dart';
@@ -150,9 +153,8 @@ final class _BrainIsolate {
   final BrainIsolateLogic _logic;
   late final LogicBlockBinding<BrainIsolateState> _binding;
 
-  /// Interrupt handle for cancelling tool waits. Only non-null while
-  /// [_executeToolCalls] is blocked waiting for results.
-  Completer<void>? _toolWaitInterrupt;
+  /// Interrupt handles for cancelling tool waits, keyed by sequence ID.
+  final Map<int, Completer<void>> _toolWaitInterrupts = {};
 
   /// Pending tool result completers, keyed by tool call ID.
   final Map<String, Completer<ToolResult>> _pendingToolResults = {};
@@ -164,15 +166,25 @@ final class _BrainIsolate {
     _binding
       ..onOutput<SendEventRequested>((output) => _sendEvent(output.event))
       ..onOutput<SendErrorRequested>((output) => _sendError(output.message))
-      ..onOutput<StoreConfigRequested>(
-        (output) => _logic.blackboard.overwrite(output.config),
+      ..onOutput<StoreConfigRequested>((output) {
+        _logic.blackboard.overwrite(output.config);
+      })
+      ..onOutput<StreamTurnRequested>(
+        (output) => unawaited(_streamTurn(output.sequenceId)),
       )
-      ..onOutput<StreamTurnRequested>((_) => unawaited(_streamTurn()))
-      ..onOutput<CancelTurnRequested>((_) => _cancelTurn())
+      ..onOutput<CancelTurnRequested>(
+        (output) => _cancelTurn(output.sequenceId),
+      )
       ..onOutput<DisposeRuntimeRequested>((_) => _disposeRuntime())
       ..onOutput<ResetRuntimeRequested>((_) => _resetRuntime())
       ..onOutput<CompleteToolResultRequested>(
         (output) => _completeToolResult(output.result),
+      )
+      ..onOutput<CreateSequenceRequested>(
+        (output) => _createSequence(output.request),
+      )
+      ..onOutput<DestroySequenceRequested>(
+        (output) => _destroySequence(output.request),
       );
   }
 
@@ -208,38 +220,73 @@ final class _BrainIsolate {
           _sendError('Cancel payload was missing.');
           return;
         }
-        _logic.input(const CancelInput());
+        _logic.input(CancelInput(sequenceId: cancel.sequenceId));
       case BrainRequestType.reset:
         _logic.input(const ResetInput());
       case BrainRequestType.dispose:
         _logic.input(const DisposeInput());
+      case BrainRequestType.createSequence:
+        final createSeq = request.createSequence;
+        if (createSeq == null) {
+          _sendError('CreateSequence payload was missing.');
+          return;
+        }
+        _logic.input(CreateSequenceInput(request: createSeq));
+      case BrainRequestType.destroySequence:
+        final destroySeq = request.destroySequence;
+        if (destroySeq == null) {
+          _sendError('DestroySequence payload was missing.');
+          return;
+        }
+        _logic.input(DestroySequenceInput(request: destroySeq));
     }
   }
 
-  bool _shouldCancel() => _data.cancelRequested;
+  bool _shouldCancel(int sequenceId) =>
+      _data.cancelRequested[sequenceId] ?? false;
 
-  Future<void> _streamTurn() async {
+  Future<void> _streamTurn(int sequenceId) async {
+    final agent = _config.agents[sequenceId];
+    final conversation = _config.conversations[sequenceId];
+    if (agent == null || conversation == null) {
+      _logic.input(
+        TurnFailed(
+          error: 'Sequence $sequenceId does not exist.',
+          sequenceId: sequenceId,
+        ),
+      );
+      return;
+    }
+
     try {
-      await _config.agent
+      await agent
           .runTurn(
-            _config.conversation,
-            toolExecutor: _executeToolCalls,
-            shouldCancel: _shouldCancel,
-            maxSteps: _data.maxSteps,
-            enableReasoning: _data.enableReasoning,
+            conversation,
+            toolExecutor: (calls) => _executeToolCalls(sequenceId, calls),
+            shouldCancel: () => _shouldCancel(sequenceId),
+            maxSteps: _data.maxSteps[sequenceId] ?? 8,
+            enableReasoning: _data.enableReasoning[sequenceId] ?? true,
           )
           .forEach(_sendEvent);
-      _logic.input(const TurnCompleted());
+      _logic.input(TurnCompleted(sequenceId: sequenceId));
     } on Object catch (error) {
-      _logic.input(TurnFailed(error: error.toString()));
+      _logic.input(
+        TurnFailed(
+          error: error.toString(),
+          sequenceId: sequenceId,
+        ),
+      );
     }
   }
 
-  Future<List<ToolResult>> _executeToolCalls(List<ToolCall> calls) async {
-    if (_shouldCancel()) throw const CancelledException();
+  Future<List<ToolResult>> _executeToolCalls(
+    int sequenceId,
+    List<ToolCall> calls,
+  ) async {
+    if (_shouldCancel(sequenceId)) throw const CancelledException();
 
     final interrupt = Completer<void>();
-    _toolWaitInterrupt = interrupt;
+    _toolWaitInterrupts[sequenceId] = interrupt;
 
     try {
       final futures = <Future<ToolResult>>[];
@@ -258,16 +305,16 @@ final class _BrainIsolate {
         cancelFuture,
       ]);
     } finally {
-      _toolWaitInterrupt = null;
+      _toolWaitInterrupts.remove(sequenceId);
       for (final call in calls) {
         _pendingToolResults.remove(call.id);
       }
     }
   }
 
-  void _cancelTurn() {
-    _data.cancelRequested = true;
-    final interrupt = _toolWaitInterrupt;
+  void _cancelTurn(int sequenceId) {
+    _data.cancelRequested[sequenceId] = true;
+    final interrupt = _toolWaitInterrupts[sequenceId];
     if (interrupt != null && !interrupt.isCompleted) {
       interrupt.complete();
     }
@@ -277,6 +324,103 @@ final class _BrainIsolate {
     final completer = _pendingToolResults.remove(result.toolCallId);
     if (completer == null || completer.isCompleted) return;
     completer.complete(result);
+  }
+
+  void _createSequence(CreateSequenceRequest request) {
+    final seqId = request.sequenceId;
+    final forkFrom = request.forkFrom;
+
+    // Validate the sequence doesn't already exist.
+    if (_config.conversations.containsKey(seqId)) {
+      _sendError('Sequence $seqId already exists.');
+      return;
+    }
+
+    // Get the runtime (implements InferenceRuntime).
+    final raw = _config.runtime;
+    if (raw is! InferenceRuntime) {
+      _sendError('Runtime does not support multi-sequence.');
+      return;
+    }
+    final runtime = raw as InferenceRuntime;
+
+    try {
+      if (forkFrom != null) {
+        // Fork: copy KV cache + create new conversation from source.
+        if (!_config.conversations.containsKey(forkFrom)) {
+          _sendError('Source sequence $forkFrom does not exist.');
+          return;
+        }
+        runtime.forkSequence(source: forkFrom, target: seqId);
+        // Copy the conversation state.
+        _config.conversations[seqId] = _config.conversations[forkFrom]!.copy();
+      } else {
+        // Create fresh sequence.
+        runtime.createSequence(seqId);
+        _config.conversations[seqId] = Conversation.initial();
+      }
+
+      // Create a new AgentLoop for this sequence.
+      // We need the LlmAdapter and ToolRegistry from the existing agent.
+      final existingAgent = _config.agents[0];
+      if (existingAgent is AgentLoop) {
+        final adapter = existingAgent.llm as InferenceAdapter;
+        final newContextManager = SlidingWindowContextManager(
+          counter: adapter.tokenCounter,
+          safetyMarginTokens: _config.defaultSettings.safetyMarginTokens,
+        );
+        _config.agents[seqId] = AgentLoop(
+          llm: existingAgent.llm,
+          tools: existingAgent.tools,
+          context: newContextManager,
+          contextSize: existingAgent.contextSize,
+          maxOutputTokens: existingAgent.maxOutputTokens,
+          temperature: existingAgent.temperature,
+          sequenceId: seqId,
+        );
+      } else {
+        _sendError('Cannot create agent loop for sequence $seqId.');
+        return;
+      }
+
+      // Initialize per-sequence data.
+      _data
+        ..cancelRequested[seqId] = false
+        ..maxSteps[seqId] = _config.defaultSettings.maxSteps
+        ..enableReasoning[seqId] = _config.enableReasoningDefault;
+    } on Object catch (e) {
+      _sendError('Failed to create sequence $seqId: $e');
+    }
+  }
+
+  void _destroySequence(DestroySequenceRequest request) {
+    final seqId = request.sequenceId;
+
+    if (seqId == 0) {
+      _sendError('Cannot destroy sequence 0.');
+      return;
+    }
+
+    if (!_config.conversations.containsKey(seqId)) {
+      _sendError('Sequence $seqId does not exist.');
+      return;
+    }
+
+    try {
+      final raw = _config.runtime;
+      if (raw is InferenceRuntime) {
+        (raw as InferenceRuntime).destroySequence(seqId);
+      }
+
+      _config.conversations.remove(seqId);
+      _config.agents.remove(seqId);
+      _data
+        ..cancelRequested.remove(seqId)
+        ..maxSteps.remove(seqId)
+        ..enableReasoning.remove(seqId);
+    } on Object catch (e) {
+      _sendError('Failed to destroy sequence $seqId: $e');
+    }
   }
 
   void _resetRuntime() {

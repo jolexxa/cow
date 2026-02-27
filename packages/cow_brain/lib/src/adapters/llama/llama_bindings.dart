@@ -64,6 +64,9 @@ abstract class LlamaBindings {
     int nTokens,
   );
 
+  llama_batch llama_batch_init(int nTokens, int embd, int nSeqMax);
+  void llama_batch_free(llama_batch batch);
+
   int llama_decode(Pointer<llama_context> ctx, llama_batch batch);
 
   llama_sampler_chain_params llama_sampler_chain_default_params();
@@ -103,6 +106,14 @@ abstract class LlamaBindings {
   bool llama_memory_seq_rm(
     llama_memory_t mem,
     int seqId,
+    int p0,
+    int p1,
+  );
+
+  void llama_memory_seq_cp(
+    llama_memory_t mem,
+    int seqIdSrc,
+    int seqIdDst,
     int p0,
     int p1,
   );
@@ -223,6 +234,13 @@ final class LlamaBindingsAdapter implements LlamaBindings {
       _bindings.llama_batch_get_one(tokens, nTokens);
 
   @override
+  llama_batch llama_batch_init(int nTokens, int embd, int nSeqMax) =>
+      _bindings.llama_batch_init(nTokens, embd, nSeqMax);
+
+  @override
+  void llama_batch_free(llama_batch batch) => _bindings.llama_batch_free(batch);
+
+  @override
   int llama_decode(Pointer<llama_context> ctx, llama_batch batch) =>
       _bindings.llama_decode(ctx, batch);
 
@@ -320,6 +338,15 @@ final class LlamaBindingsAdapter implements LlamaBindings {
     int p0,
     int p1,
   ) => _bindings.llama_memory_seq_rm(mem, seqId, p0, p1);
+
+  @override
+  void llama_memory_seq_cp(
+    llama_memory_t mem,
+    int seqIdSrc,
+    int seqIdDst,
+    int p0,
+    int p1,
+  ) => _bindings.llama_memory_seq_cp(mem, seqIdSrc, seqIdDst, p0, p1);
 
   @override
   Pointer<Char> llama_model_chat_template(

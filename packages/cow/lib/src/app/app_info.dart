@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:blocterm/blocterm.dart';
@@ -23,6 +24,8 @@ class AppInfo {
     required this.modelServer,
     required this.primarySeed,
     required this.summarySeed,
+    required this.systemPrompt,
+    required this.summarySystemPrompt,
   });
 
   static const String executableName = 'cow';
@@ -42,11 +45,14 @@ class AppInfo {
   final ModelServer modelServer;
   final int primarySeed;
   final int summarySeed;
+  final String systemPrompt;
+  final String summarySystemPrompt;
 
   static Future<AppInfo> initialize({
     required OSPlatform platform,
   }) async {
     final cowPaths = CowPaths();
+    Directory(cowPaths.cowDir).createSync(recursive: true);
     final config = CowConfig.fromFile(cowPaths.configFile);
     final resolved = ConfigResolver.resolve(config, platform: platform);
     final modelProfile = resolved.primary;
@@ -104,6 +110,13 @@ class AppInfo {
       modelServer: modelServer,
       primarySeed: primarySeed,
       summarySeed: summarySeed,
+      systemPrompt:
+          'You are Cow, a helpful AI assistant. '
+          'Feel free to spice things up by using cow-inspired jargon '
+          'and emoji. English only.',
+      summarySystemPrompt:
+          'You are a summarization assistant. '
+          'Summarize the given text as concisely as possible.',
     );
   }
 

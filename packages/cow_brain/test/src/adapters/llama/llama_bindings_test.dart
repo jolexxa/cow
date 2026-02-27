@@ -147,6 +147,14 @@ void main() {
       expect(adapter.llama_memory_seq_pos_max(fake.memoryPtr, 0), 20);
       expect(adapter.llama_memory_seq_rm(fake.memoryPtr, 0, 0, 4), isTrue);
 
+      adapter.llama_memory_seq_cp(fake.memoryPtr, 0, 1, 0, 4);
+      expect(fake.seqCpCalls, 1);
+
+      final initBatch = adapter.llama_batch_init(8, 0, 1);
+      expect(fake.batchInitCalls, 1);
+      adapter.llama_batch_free(initBatch);
+      expect(fake.batchFreeCalls, 1);
+
       expect(
         adapter.llama_model_chat_template(fake.modelPtr, nullptr.cast()),
         same(fake.chatTemplatePtr),
@@ -230,6 +238,9 @@ final class FakeCppBindings extends LlamaCppBindings {
   int samplerFreeCalls = 0;
   int chatTemplateCalls = 0;
   int metaValStrCalls = 0;
+  int seqCpCalls = 0;
+  int batchInitCalls = 0;
+  int batchFreeCalls = 0;
   final Pointer<Char> chatTemplatePtr = Pointer.fromAddress(99);
   ggml_numa_strategy? lastNuma;
 
@@ -430,6 +441,28 @@ final class FakeCppBindings extends LlamaCppBindings {
   @override
   bool llama_memory_seq_rm(llama_memory_t mem, int seqId, int p0, int p1) =>
       true;
+
+  @override
+  void llama_memory_seq_cp(
+    llama_memory_t mem,
+    int seqIdSrc,
+    int seqIdDst,
+    int p0,
+    int p1,
+  ) {
+    seqCpCalls += 1;
+  }
+
+  @override
+  llama_batch llama_batch_init(int nTokens, int embd, int nSeqMax) {
+    batchInitCalls += 1;
+    return batch;
+  }
+
+  @override
+  void llama_batch_free(llama_batch batch) {
+    batchFreeCalls += 1;
+  }
 
   @override
   Pointer<Char> llama_model_chat_template(

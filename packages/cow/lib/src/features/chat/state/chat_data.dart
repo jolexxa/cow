@@ -42,4 +42,10 @@ final class ChatData {
 
   /// Total number of models to load (set before loading starts).
   int totalModelsToLoad = 0;
+
+  /// System prompt for the primary brain.
+  String systemPrompt = '';
+
+  /// System prompt for the summary brain.
+  String summarySystemPrompt = '';
 }

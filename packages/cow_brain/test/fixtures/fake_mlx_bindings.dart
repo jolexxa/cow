@@ -244,4 +244,115 @@ final class FakeMlxBindings implements MlxBindings {
     lastCacheTrimFrontN = n;
     return cacheTrimFrontResult;
   }
+
+  // -- Multi-sequence support --
+
+  bool forkContextResult = true;
+  int forkContextCalls = 0;
+  (int, int)? lastForkContextArgs;
+
+  @override
+  bool forkContext(int srcContext, int dstContext) {
+    forkContextCalls++;
+    lastForkContextArgs = (srcContext, dstContext);
+    return forkContextResult;
+  }
+
+  // -- Batch generation --
+
+  int batchCreateResult = 1;
+  int batchCreateCalls = 0;
+  int batchFreeCalls = 0;
+  bool batchAddSequenceResult = true;
+  int batchAddSequenceCalls = 0;
+  int batchPrefillResult = 1;
+  int batchPrefillCalls = 0;
+  int batchStepResult = 0;
+  int batchStepCalls = 0;
+  bool batchRemoveSequenceResult = true;
+  int batchRemoveSequenceCalls = 0;
+  int batchActiveCountResult = 0;
+  int batchActiveCountCalls = 0;
+
+  int Function(
+    int batchHandle,
+    Pointer<Utf8> outTokenBytes,
+    int outBufLen,
+    Pointer<Int32> outByteLens,
+    Pointer<Int32> outSeqIds,
+    int maxSeqs,
+  )?
+  batchStepImpl;
+
+  @override
+  int batchCreate(int modelHandle, int maxTokens) {
+    batchCreateCalls++;
+    return batchCreateResult;
+  }
+
+  @override
+  void batchFree(int batchHandle) {
+    batchFreeCalls++;
+  }
+
+  @override
+  bool batchAddSequence(
+    int batchHandle,
+    int seqId,
+    Pointer<Int32> tokens,
+    int tokenCount,
+  ) {
+    batchAddSequenceCalls++;
+    return batchAddSequenceResult;
+  }
+
+  @override
+  int batchPrefill(
+    int batchHandle,
+    double temperature,
+    double topP,
+    int topK,
+    double minP,
+    double repeatPenalty,
+    int repeatWindow,
+    int seed,
+  ) {
+    batchPrefillCalls++;
+    return batchPrefillResult;
+  }
+
+  @override
+  int batchStep(
+    int batchHandle,
+    Pointer<Utf8> outTokenBytes,
+    int outBufLen,
+    Pointer<Int32> outByteLens,
+    Pointer<Int32> outSeqIds,
+    int maxSeqs,
+  ) {
+    batchStepCalls++;
+    if (batchStepImpl != null) {
+      return batchStepImpl!(
+        batchHandle,
+        outTokenBytes,
+        outBufLen,
+        outByteLens,
+        outSeqIds,
+        maxSeqs,
+      );
+    }
+    return batchStepResult;
+  }
+
+  @override
+  bool batchRemoveSequence(int batchHandle, int seqId) {
+    batchRemoveSequenceCalls++;
+    return batchRemoveSequenceResult;
+  }
+
+  @override
+  int batchActiveCount(int batchHandle) {
+    batchActiveCountCalls++;
+    return batchActiveCountResult;
+  }
 }

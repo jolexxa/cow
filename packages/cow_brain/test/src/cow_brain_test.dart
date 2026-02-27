@@ -34,6 +34,8 @@ void _fakeBrainIsolate(SendPort sendPort) {
       case BrainRequestType.cancel:
       case BrainRequestType.reset:
       case BrainRequestType.dispose:
+      case BrainRequestType.createSequence:
+      case BrainRequestType.destroySequence:
         return;
     }
   });
@@ -95,6 +97,7 @@ void main() {
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
+        systemPrompt: 'You are a test assistant.',
       );
 
       final events = await brain
@@ -115,7 +118,9 @@ void main() {
             content: 'ok',
           ),
         )
-        ..cancel('turn-1')
+        ..cancel(turnId: 'turn-1')
+        ..createSequence(sequenceId: 1, forkFrom: 0)
+        ..destroySequence(1)
         ..reset();
 
       await brain.dispose();
@@ -195,6 +200,7 @@ void main() {
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
+        systemPrompt: 'You are a test assistant.',
       );
       await brainB.init(
         modelHandle: model.modelPointer,
@@ -203,6 +209,7 @@ void main() {
         tools: const <ToolDefinition>[],
         settings: _settings(),
         enableReasoning: true,
+        systemPrompt: 'You are a test assistant.',
       );
 
       await brains.remove('a');

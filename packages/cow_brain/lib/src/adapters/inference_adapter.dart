@@ -21,7 +21,17 @@ abstract interface class InferenceRuntime {
     required bool addBos,
     required bool requiresReset,
     required int reusePrefixMessageCount,
+    int sequenceId = 0,
   });
+
+  /// Create a new sequence slot.
+  void createSequence(int sequenceId);
+
+  /// Destroy a sequence and free its KV cache.
+  void destroySequence(int sequenceId);
+
+  /// Fork: copy KV cache + cached tokens from source to target.
+  void forkSequence({required int source, required int target});
 }
 
 /// Thin llama-based adapter that defers model specifics to a profile.
@@ -47,18 +57,17 @@ final class InferenceAdapter implements LlmAdapter {
   Stream<ModelOutput> next({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
     required bool enableReasoning,
     required LlmConfig config,
   }) async* {
     final prompt = profile.formatter.format(
       messages: messages,
       tools: tools,
-      systemApplied: systemApplied,
       enableReasoning: enableReasoning,
     );
     yield* profile.streamParser.parse(
       _runtime.generate(
+        sequenceId: config.sequenceId,
         prompt: prompt,
         stopSequences: profile.formatter.stopSequences,
         addBos: profile.formatter.addBos,

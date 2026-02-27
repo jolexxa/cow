@@ -7,6 +7,5 @@ abstract interface class TokenCounter {
   int countPromptTokens({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
   });
 }

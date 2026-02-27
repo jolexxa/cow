@@ -381,6 +381,174 @@ class CowMlxBindings {
       );
   late final _cow_mlx_cache_trim_front = _cow_mlx_cache_trim_frontPtr
       .asFunction<int Function(int, int)>();
+
+  /// Fork context: copy KV cache + cached tokens from source to destination.
+  bool cow_mlx_fork_context(int srcContext, int dstContext) {
+    return _cow_mlx_fork_context(srcContext, dstContext);
+  }
+
+  late final _cow_mlx_fork_contextPtr =
+      _lookup<ffi.NativeFunction<ffi.Bool Function(ffi.Int32, ffi.Int32)>>(
+        'cow_mlx_fork_context',
+      );
+  late final _cow_mlx_fork_context = _cow_mlx_fork_contextPtr
+      .asFunction<bool Function(int, int)>();
+
+  // -------------------------------------------------------------------------
+  // Batch generation
+  // -------------------------------------------------------------------------
+
+  int cow_mlx_batch_create(int model, int max_tokens) {
+    return _cow_mlx_batch_create(model, max_tokens);
+  }
+
+  late final _cow_mlx_batch_createPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Int32, ffi.Int32)>>(
+        'cow_mlx_batch_create',
+      );
+  late final _cow_mlx_batch_create = _cow_mlx_batch_createPtr
+      .asFunction<int Function(int, int)>();
+
+  void cow_mlx_batch_free(int batch) {
+    return _cow_mlx_batch_free(batch);
+  }
+
+  late final _cow_mlx_batch_freePtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Int32)>>(
+        'cow_mlx_batch_free',
+      );
+  late final _cow_mlx_batch_free = _cow_mlx_batch_freePtr
+      .asFunction<void Function(int)>();
+
+  bool cow_mlx_batch_add_sequence(
+    int batch,
+    int seq_id,
+    ffi.Pointer<ffi.Int32> tokens,
+    int token_count,
+  ) {
+    return _cow_mlx_batch_add_sequence(batch, seq_id, tokens, token_count);
+  }
+
+  late final _cow_mlx_batch_add_sequencePtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Bool Function(
+            ffi.Int32,
+            ffi.Int32,
+            ffi.Pointer<ffi.Int32>,
+            ffi.Int32,
+          )
+        >
+      >('cow_mlx_batch_add_sequence');
+  late final _cow_mlx_batch_add_sequence = _cow_mlx_batch_add_sequencePtr
+      .asFunction<bool Function(int, int, ffi.Pointer<ffi.Int32>, int)>();
+
+  int cow_mlx_batch_prefill(
+    int batch,
+    double temperature,
+    double top_p,
+    int top_k,
+    double min_p,
+    double repeat_penalty,
+    int repeat_window,
+    int seed,
+  ) {
+    return _cow_mlx_batch_prefill(
+      batch,
+      temperature,
+      top_p,
+      top_k,
+      min_p,
+      repeat_penalty,
+      repeat_window,
+      seed,
+    );
+  }
+
+  late final _cow_mlx_batch_prefillPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Int32 Function(
+            ffi.Int32,
+            ffi.Float,
+            ffi.Float,
+            ffi.Int32,
+            ffi.Float,
+            ffi.Float,
+            ffi.Int32,
+            ffi.Int32,
+          )
+        >
+      >('cow_mlx_batch_prefill');
+  late final _cow_mlx_batch_prefill = _cow_mlx_batch_prefillPtr
+      .asFunction<
+        int Function(int, double, double, int, double, double, int, int)
+      >();
+
+  int cow_mlx_batch_step(
+    int batch,
+    ffi.Pointer<ffi.Char> out_token_bytes,
+    int out_buf_len,
+    ffi.Pointer<ffi.Int32> out_byte_lens,
+    ffi.Pointer<ffi.Int32> out_seq_ids,
+    int max_seqs,
+  ) {
+    return _cow_mlx_batch_step(
+      batch,
+      out_token_bytes,
+      out_buf_len,
+      out_byte_lens,
+      out_seq_ids,
+      max_seqs,
+    );
+  }
+
+  late final _cow_mlx_batch_stepPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Int32 Function(
+            ffi.Int32,
+            ffi.Pointer<ffi.Char>,
+            ffi.Int32,
+            ffi.Pointer<ffi.Int32>,
+            ffi.Pointer<ffi.Int32>,
+            ffi.Int32,
+          )
+        >
+      >('cow_mlx_batch_step');
+  late final _cow_mlx_batch_step = _cow_mlx_batch_stepPtr
+      .asFunction<
+        int Function(
+          int,
+          ffi.Pointer<ffi.Char>,
+          int,
+          ffi.Pointer<ffi.Int32>,
+          ffi.Pointer<ffi.Int32>,
+          int,
+        )
+      >();
+
+  bool cow_mlx_batch_remove_sequence(int batch, int seq_id) {
+    return _cow_mlx_batch_remove_sequence(batch, seq_id);
+  }
+
+  late final _cow_mlx_batch_remove_sequencePtr =
+      _lookup<ffi.NativeFunction<ffi.Bool Function(ffi.Int32, ffi.Int32)>>(
+        'cow_mlx_batch_remove_sequence',
+      );
+  late final _cow_mlx_batch_remove_sequence = _cow_mlx_batch_remove_sequencePtr
+      .asFunction<bool Function(int, int)>();
+
+  int cow_mlx_batch_active_count(int batch) {
+    return _cow_mlx_batch_active_count(batch);
+  }
+
+  late final _cow_mlx_batch_active_countPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Int32)>>(
+        'cow_mlx_batch_active_count',
+      );
+  late final _cow_mlx_batch_active_count = _cow_mlx_batch_active_countPtr
+      .asFunction<int Function(int)>();
 }
 
 typedef cow_mlx_progress_fnFunction =

@@ -54,6 +54,7 @@ final class SummaryBrain {
     required int modelHandle,
     required BackendRuntimeOptions options,
     required ModelProfileId profile,
+    required String systemPrompt,
   }) async {
     await _brain.init(
       modelHandle: modelHandle,
@@ -62,6 +63,7 @@ final class SummaryBrain {
       tools: const [],
       settings: _settings,
       enableReasoning: false,
+      systemPrompt: systemPrompt,
     );
   }
 }

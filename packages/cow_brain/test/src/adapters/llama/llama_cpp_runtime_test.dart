@@ -5,6 +5,7 @@ import 'dart:collection';
 import 'dart:ffi';
 import 'dart:typed_data';
 
+import 'package:cow_brain/src/adapters/chunked_utf8.dart';
 import 'package:cow_brain/src/adapters/llama/llama.dart';
 import 'package:cow_brain/src/adapters/stream_chunk.dart';
 import 'package:cow_brain/src/isolate/models.dart';
@@ -160,7 +161,8 @@ void main() {
           )
           .toList();
 
-      expect(client.resetCalls, 1);
+      // Reset now clears KV cache via llama_memory_seq_rm (not resetContext).
+      expect(client.resetCalls, 0);
     });
 
     test('honors stop sequences and control tokens', () async {
@@ -278,7 +280,10 @@ void main() {
 
         final count = runtime.countTokens('next', addBos: true);
         expect(count, 1);
-        expect(client.addSpecialCalls, [true, false]);
+        // countTokens always counts conservatively (addSpecial: true) to avoid
+        // underestimating the budget. The per-sequence BOS state only affects
+        // generate(), not budget estimation.
+        expect(client.addSpecialCalls, [true, true]);
 
         runtime.dispose();
         expect(() => runtime.countTokens('x', addBos: true), throwsStateError);
@@ -366,7 +371,7 @@ void main() {
 
     test('chunked string sink writes all and writeln', () {
       final chunks = <String>[];
-      final sink = llamaChunkedStringSink(chunks);
+      final sink = ChunkedStringSink(chunks);
       sink.writeAll([1, null, 'b'], ',');
       sink.writeln('x');
       sink.writeln();
@@ -669,7 +674,13 @@ void main() {
             )
             .toList();
 
-        expect(client.resetCalls, 1);
+        // Reset now clears KV cache via llama_memory_seq_rm (not resetContext).
+        expect(client.resetCalls, 0);
+        expect(
+          bindings.memoryRmHistory,
+          isNotEmpty,
+          reason: 'KV cache should be cleared on reset',
+        );
         // BOS re-sent after reset.
         expect(client.addSpecialCalls, [true, true]);
       },
@@ -732,8 +743,8 @@ void main() {
           .toList();
 
       expect(client.addSpecialCalls, [true, false, true]);
-      // Reset was called exactly once (gen3 only, not gen1 or gen2).
-      expect(client.resetCalls, 1);
+      // Reset now clears KV cache via llama_memory_seq_rm (not resetContext).
+      expect(client.resetCalls, 0);
     });
 
     test(
@@ -787,6 +798,58 @@ void main() {
       },
     );
 
+    test(
+      'per-sequence KV budget uses contextSize / maxSequences',
+      () async {
+        // With maxSequences=2, each sequence gets contextSize/2 = 6 tokens.
+        // 4 existing + 2 prompt + 4 output = 10 > 6, should drop 4.
+        final bindings = FakeLlamaBindings()
+          ..posMin = 0
+          ..posMax =
+              3 // 4 tokens already in cache
+          ..vocabIsEogImpl = (_, _) => true;
+        final client = FakeClient(bindings)
+          ..tokenizeResult = List<int>.filled(2, 1)
+          ..sampleQueue.addAll([2, 2]);
+
+        final runtime = LlamaCppRuntime(
+          modelPointer: 1,
+          options: const LlamaCppRuntimeOptions(
+            modelPath: 'model',
+            libraryPath: '/tmp/libllama.so',
+            contextOptions: LlamaContextOptions(
+              contextSize: 12,
+              nBatch: 4,
+              nThreads: 1,
+              nThreadsBatch: 1,
+            ),
+            maxOutputTokensDefault: 4,
+            maxSequences: 2,
+          ),
+          client: client,
+          bindings: bindings,
+        );
+
+        await runtime
+            .generate(
+              prompt: 'hi',
+              stopSequences: const [],
+              addBos: true,
+              requiresReset: false,
+              reusePrefixMessageCount: 0,
+            )
+            .toList();
+
+        expect(bindings.lastMemoryRmArgs, isNotNull);
+        final (_, seqId, p0, p1) = bindings.lastMemoryRmArgs!;
+        expect(seqId, 0);
+        // Per-seq budget = 12 ~/ 2 = 6. Projected = 4 + 2 + 4 = 10.
+        // Drop 10 - 6 = 4 tokens from front.
+        expect(p0, 0);
+        expect(p1, 4);
+      },
+    );
+
     group('prefix caching', () {
       test('reuses common prefix and only decodes new tokens', () async {
         final bindings = FakeLlamaBindings()..vocabIsEogImpl = (_, _) => true;
@@ -822,8 +885,8 @@ void main() {
             )
             .toList();
 
-        // First call decoded [10, 20, 30] in one batch.
-        expect(client.decodedTokenLists.first, [10, 20, 30]);
+        // Prefill decoded [10, 20, 30] across two batches (non-final + final).
+        expect(client.allDecodedTokens, [10, 20, 30]);
         client.decodedTokenLists.clear();
         client.decodeCalls = 0;
 
@@ -840,7 +903,7 @@ void main() {
             .toList();
 
         // Should only decode the new suffix [40, 50], not the full prompt.
-        expect(client.decodedTokenLists.first, [40, 50]);
+        expect(client.allDecodedTokens, [40, 50]);
       });
 
       test('trims KV cache when prompt diverges from cached tokens', () async {
@@ -906,7 +969,7 @@ void main() {
         expect(trimCall.$4, 3); // p1 = posMax + 1
 
         // Should only decode the diverged suffix [77, 88].
-        expect(client.decodedTokenLists.first, [77, 88]);
+        expect(client.allDecodedTokens, [77, 88]);
       });
 
       test('tracks generated tokens for prefix matching', () async {
@@ -1022,7 +1085,7 @@ void main() {
             .toList();
 
         // Full prompt re-decoded despite matching tokens.
-        expect(client.decodedTokenLists.first, [10, 20, 30]);
+        expect(client.allDecodedTokens, [10, 20, 30]);
       });
 
       test('skips decode when prompt exactly matches cached tokens', () async {
@@ -1159,10 +1222,7 @@ void main() {
           // _ensureRoomFor: 8 existing + 2 new + 4 out = 14 > 12
           // drops 2 from front → cachedTokens trimmed partially.
           // Then decodes [50, 60].
-          expect(
-            client.decodedTokenLists.first,
-            [50, 60],
-          );
+          expect(client.allDecodedTokens, [50, 60]);
         },
       );
     });
@@ -1204,6 +1264,190 @@ void main() {
       final text = output.map((chunk) => chunk.text).join();
       expect(text, isEmpty);
     });
+
+    test('createSequence initialises tracking for a new sequence', () {
+      final bindings = FakeLlamaBindings();
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      runtime.createSequence(1);
+
+      // Should not throw when generating on the new sequence.
+      expect(
+        () => runtime.createSequence(1),
+        throwsStateError,
+      );
+    });
+
+    test('destroySequence removes KV cache and tracking', () {
+      final bindings = FakeLlamaBindings()
+        ..posMin = 0
+        ..posMax = 5;
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      runtime.createSequence(1);
+      runtime.destroySequence(1);
+
+      expect(bindings.lastMemoryRmArgs, isNotNull);
+
+      // Destroyed sequence should not exist.
+      expect(
+        () => runtime.destroySequence(1),
+        throwsStateError,
+      );
+    });
+
+    test('destroySequence on non-existent sequence throws', () {
+      final bindings = FakeLlamaBindings();
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      expect(
+        () => runtime.destroySequence(99),
+        throwsStateError,
+      );
+    });
+
+    test('forkSequence copies KV cache and tracking', () {
+      final bindings = FakeLlamaBindings()
+        ..posMin = 0
+        ..posMax = 3;
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      runtime.forkSequence(source: 0, target: 1);
+
+      // No seq_cp call — re-prefill happens on next generate() instead.
+      expect(bindings.memorySeqCpCalls, 0);
+    });
+
+    test('forkSequence throws when target already exists', () {
+      final bindings = FakeLlamaBindings();
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      runtime.createSequence(1);
+      expect(
+        () => runtime.forkSequence(source: 0, target: 1),
+        throwsStateError,
+      );
+    });
+
+    test('SequenceState.trimCacheTo is a no-op when length >= cache size', () {
+      final state = SequenceState()..cachedTokens = [1, 2, 3];
+      state.trimCacheTo(5);
+      expect(state.cachedTokens, [1, 2, 3]);
+      state.trimCacheTo(3);
+      expect(state.cachedTokens, [1, 2, 3]);
+    });
+
+    test('forkSequence throws when source does not exist', () {
+      final bindings = FakeLlamaBindings();
+      final client = FakeClient(bindings);
+
+      final runtime = LlamaCppRuntime(
+        modelPointer: 1,
+        options: const LlamaCppRuntimeOptions(
+          modelPath: 'model',
+          libraryPath: '/tmp/libllama.so',
+          contextOptions: LlamaContextOptions(
+            contextSize: 64,
+            nBatch: 4,
+            nThreads: 1,
+            nThreadsBatch: 1,
+          ),
+          maxOutputTokensDefault: 10,
+        ),
+        client: client,
+        bindings: bindings,
+      );
+
+      expect(
+        () => runtime.forkSequence(source: 99, target: 1),
+        throwsStateError,
+      );
+    });
   });
 }
 
@@ -1219,6 +1463,10 @@ final class FakeClient implements LlamaClientApi {
   int decodeCalls = 0;
   int disposeCalls = 0;
   final List<List<int>> decodedTokenLists = [];
+
+  /// All decoded tokens across all decodeBatch calls, flattened.
+  List<int> get allDecodedTokens => decodedTokenLists.expand((l) => l).toList();
+
   Pointer<llama_context> createContextResult = Pointer.fromAddress(2);
   Pointer<llama_context> initialContext = Pointer.fromAddress(2);
 
@@ -1250,16 +1498,18 @@ final class FakeClient implements LlamaClientApi {
   @override
   void resetContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  ) {
+    LlamaContextOptions options, {
+    required int maxSequences,
+  }) {
     resetCalls += 1;
   }
 
   @override
   Pointer<llama_context> createContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  ) {
+    LlamaContextOptions options, {
+    int maxSequences = 1,
+  }) {
     return createContextResult;
   }
 
@@ -1267,16 +1517,45 @@ final class FakeClient implements LlamaClientApi {
   void decode(
     LlamaHandles handles,
     Pointer<llama_context> context,
-    List<int> tokens,
-  ) {
+    List<int> tokens, {
+    int sequenceId = 0,
+  }) {
     decodeCalls += 1;
     decodedTokenLists.add(List<int>.of(tokens));
+    decodedSeqIds.add(sequenceId);
+  }
+
+  final List<int> decodedSeqIds = [];
+
+  @override
+  void decodeBatch(
+    LlamaHandles handles,
+    Pointer<llama_context> context,
+    List<({int token, int pos, int seqId, bool logits})> entries,
+  ) {
+    decodeCalls += 1;
+    decodedTokenLists.add(entries.map((e) => e.token).toList());
+    for (final e in entries) {
+      decodedSeqIds.add(e.seqId);
+    }
   }
 
   @override
   int sampleNext(
     LlamaHandles handles,
     LlamaSamplerChain sampler,
+  ) {
+    if (sampleQueue.isEmpty) {
+      return 0;
+    }
+    return sampleQueue.removeFirst();
+  }
+
+  @override
+  int sampleAt(
+    LlamaHandles handles,
+    LlamaSamplerChain sampler,
+    int batchIndex,
   ) {
     if (sampleQueue.isEmpty) {
       return 0;

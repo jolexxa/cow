@@ -23,7 +23,8 @@ final class ToolResultInput extends BrainIsolateInput {
 }
 
 final class CancelInput extends BrainIsolateInput {
-  const CancelInput();
+  const CancelInput({this.sequenceId = 0});
+  final int sequenceId;
 }
 
 final class ResetInput extends BrainIsolateInput {
@@ -35,10 +36,22 @@ final class DisposeInput extends BrainIsolateInput {
 }
 
 final class TurnCompleted extends BrainIsolateInput {
-  const TurnCompleted();
+  const TurnCompleted({this.sequenceId = 0});
+  final int sequenceId;
 }
 
 final class TurnFailed extends BrainIsolateInput {
-  const TurnFailed({required this.error});
+  const TurnFailed({required this.error, this.sequenceId = 0});
   final String error;
+  final int sequenceId;
+}
+
+final class CreateSequenceInput extends BrainIsolateInput {
+  const CreateSequenceInput({required this.request});
+  final CreateSequenceRequest request;
+}
+
+final class DestroySequenceInput extends BrainIsolateInput {
+  const DestroySequenceInput({required this.request});
+  final DestroySequenceRequest request;
 }

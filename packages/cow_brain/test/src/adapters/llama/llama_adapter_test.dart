@@ -52,7 +52,6 @@ void main() {
                 parameters: {'type': 'object'},
               ),
             ],
-            systemApplied: false,
             enableReasoning: true,
             config: config,
           )
@@ -90,7 +89,6 @@ void main() {
       final tokens = adapter.tokenCounter.countPromptTokens(
         messages: const [Message(role: Role.user, content: 'Hello')],
         tools: const [],
-        systemApplied: false,
       );
 
       expect(tokens, greaterThan(0));
@@ -119,7 +117,6 @@ void main() {
               Message(role: Role.user, content: 'Hello'),
             ],
             tools: const [],
-            systemApplied: false,
             enableReasoning: true,
             config: config,
           )
@@ -156,6 +153,7 @@ final class FakeInferenceRuntime implements InferenceRuntime {
     required bool addBos,
     required bool requiresReset,
     required int reusePrefixMessageCount,
+    int sequenceId = 0,
   }) async* {
     lastPrompt = prompt;
     lastAddBos = addBos;
@@ -164,4 +162,13 @@ final class FakeInferenceRuntime implements InferenceRuntime {
       yield StreamChunk(text: chunk, tokenCountDelta: 0);
     }
   }
+
+  @override
+  void createSequence(int sequenceId) {}
+
+  @override
+  void destroySequence(int sequenceId) {}
+
+  @override
+  void forkSequence({required int source, required int target}) {}
 }

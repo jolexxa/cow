@@ -32,9 +32,23 @@ This downloads the latest release for your platform and installs it to `~/.local
 Cow supports two inference backends:
 
 - **[llama.cpp]** via [llama_cpp_dart](./packages/llama_cpp_dart/README.md) — runs GGUF models on CPU or GPU. Llama.cpp is cross platform and works just about anywhere.
-- **[MLX]** via [cow_mlx](./packages/cow_mlx/README.md) + [mlx_dart](./packages/mlx_dart/README.md) — runs MLX-format models natively on Apple Silicon. MLX tends to outperform llama.cpp by almost an order of magnitude or more on Apple Silicon hardware.
+- **[MLX]** via [cow_mlx](./packages/cow_mlx/README.md) + [mlx_dart](./packages/mlx_dart/README.md) — runs MLX-format models natively on Apple Silicon. MLX outperforms llama.cpp on Apple Silicon hardware.
 
 A higher-level package called [cow_brain](./packages/cow_brain/README.md) wraps both backends behind a common `InferenceRuntime` interface and enables high-level agentic functionality (reasoning, tool use, context management).
+
+Cow brain can run multiple inference *sequences* concurrently. In the future, this will allow Cow to efficiently spawn and execute subagents which diverge from the same conversation history.
+
+Both backends support batched decoding to speed up concurrent workloads:
+
+| Platform               | Backend   | Batching                               | Speedup |
+|------------------------|-----------|----------------------------------------|---------|
+| macOS (Apple Silicon)  | MLX       | [mlx-swift] fork with batched decoding | 1.56x   |
+| Linux (AMD/NVIDIA GPU) | llama.cpp | Multi-sequence `llama_batch`           | 1.48x   |
+
+This was not-so-scientifically-measured by the [benchmark.dart](./packages/cow_e2e/test/batching_benchmark.dart) stress test on an M1 Max Macbook Pro and a Linux desktop with an AMD 9070.
+
+> [!NOTE]
+> llama.cpp batching does not currently benefit Apple Silicon's Metal backend due to [known kernel limitations][llama_cpp_batching]. In fact, it actually slows things down for long conversations. On macOS, MLX is strongly preferred.
 
 On Apple Silicon, Cow uses MLX with `Qwen 3-8B 4-bit` for primary interactions and `Qwen 2.5-3B Instruct 4-bit` for lightweight summarization. On Linux, Cow uses llama.cpp with the equivalent GGUF models.
 
@@ -174,4 +188,6 @@ Cow itself is licensed under the permissive MIT license. Yee-haw!
 [Alibaba Cloud]: https://www.alibabacloud.com/
 [jinja]: https://jinja.palletsprojects.com/
 [llama.cpp]: https://github.com/ggml-org/llama.cpp
+[mlx-swift]: https://github.com/ml-explore/mlx-swift-examples
+[llama_cpp_batching]: https://github.com/ggml-org/llama.cpp/discussions/6777
 [Xcode]: https://developer.apple.com/xcode/

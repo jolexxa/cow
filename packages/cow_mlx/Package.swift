@@ -9,8 +9,8 @@ let package = Package(
     ],
     dependencies: [
         .package(
-            url: "https://github.com/ml-explore/mlx-swift-lm",
-            branch: "main"
+            url: "https://github.com/zoomorphic-org/mlx-swift-lm",
+            branch: "feat/batching"
         ),
         .package(
             url: "https://github.com/ml-explore/mlx-swift",

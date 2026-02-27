@@ -21,16 +21,6 @@ void main() {
       expect(conversation.beginTurn(), 'turn-2');
     });
 
-    test('systemApplied can be toggled explicitly', () {
-      final conversation = Conversation.initial();
-
-      expect(conversation.systemApplied, isFalse);
-      conversation.setSystemApplied(value: true);
-      expect(conversation.systemApplied, isTrue);
-      conversation.setSystemApplied(value: false);
-      expect(conversation.systemApplied, isFalse);
-    });
-
     test('addUser rejects empty content', () {
       final conversation = Conversation.initial();
 
@@ -90,6 +80,25 @@ void main() {
       );
 
       expect(() => conversation.appendToolResult(result), throwsArgumentError);
+    });
+
+    test('copy creates an independent deep copy', () {
+      final original = Conversation.initial(systemPrompt: 'sys')
+        ..addUser('hello')
+        ..beginTurn();
+
+      final copied = original.copy();
+
+      // Same messages.
+      expect(copied.messages.length, original.messages.length);
+
+      // Independent — mutating copy doesn't affect original.
+      copied.addUser('world');
+      expect(copied.messages.length, original.messages.length + 1);
+
+      // Turn counter is also independent.
+      expect(copied.beginTurn(), 'turn-2');
+      expect(original.beginTurn(), 'turn-2');
     });
 
     test('appendToolResult appends a tool message when valid', () {

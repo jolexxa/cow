@@ -30,7 +30,6 @@ void main() {
           tools: const [],
           contextSize: 110,
           maxOutputTokens: 10,
-          systemApplied: false,
         );
 
         expect(slice.droppedMessageCount, 1);
@@ -39,23 +38,6 @@ void main() {
         expect(slice.messages.last.content, contains('Second'));
       },
     );
-
-    test('allows dropping the system prompt when it is already applied', () {
-      final manager = SlidingWindowContextManager(
-        counter: FakeTokenCounter(),
-      );
-
-      final slice = manager.prepare(
-        messages: [system('system'), user('user')],
-        tools: const [],
-        contextSize: 25,
-        maxOutputTokens: 10,
-        systemApplied: true,
-      );
-
-      expect(slice.messages, hasLength(1));
-      expect(slice.messages.single.role, Role.user);
-    });
 
     test('safety margin reduces the usable budget', () {
       final manager = SlidingWindowContextManager(
@@ -71,7 +53,6 @@ void main() {
         tools: const [],
         contextSize: 75,
         maxOutputTokens: 10,
-        systemApplied: true,
       );
 
       expect(slice.droppedMessageCount, 1);
@@ -90,7 +71,6 @@ void main() {
         tools: const [tool],
         contextSize: 88,
         maxOutputTokens: 10,
-        systemApplied: true,
       );
 
       expect(slice.droppedMessageCount, 1);
@@ -106,7 +86,6 @@ void main() {
         tools: const [],
         contextSize: 200,
         maxOutputTokens: 20,
-        systemApplied: false,
       );
 
       final next = manager.prepare(
@@ -114,7 +93,7 @@ void main() {
         tools: const [],
         contextSize: 200,
         maxOutputTokens: 20,
-        systemApplied: false,
+
         previousSlice: previous,
       );
 
@@ -134,7 +113,6 @@ void main() {
           tools: const [],
           contextSize: 200,
           maxOutputTokens: 20,
-          systemApplied: false,
         );
 
         final next = manager.prepare(
@@ -142,7 +120,7 @@ void main() {
           tools: const [],
           contextSize: 45,
           maxOutputTokens: 10,
-          systemApplied: false,
+
           previousSlice: previous,
         );
 
@@ -164,7 +142,6 @@ void main() {
           tools: const [],
           contextSize: 10,
           maxOutputTokens: 10,
-          systemApplied: true,
         ),
         throwsArgumentError,
       );
@@ -181,7 +158,6 @@ void main() {
           tools: const [],
           contextSize: 50,
           maxOutputTokens: 10,
-          systemApplied: false,
         ),
         throwsStateError,
       );
@@ -207,7 +183,6 @@ void main() {
         tools: const [],
         contextSize: 500,
         maxOutputTokens: 20,
-        systemApplied: false,
       );
 
       expect(slice1.reusePrefixMessageCount, 0);
@@ -220,7 +195,7 @@ void main() {
         tools: const [],
         contextSize: 500,
         maxOutputTokens: 20,
-        systemApplied: false,
+
         previousSlice: slice1,
       );
 
@@ -234,7 +209,7 @@ void main() {
         tools: const [],
         contextSize: 500,
         maxOutputTokens: 20,
-        systemApplied: false,
+
         previousSlice: slice2,
       );
 
@@ -248,7 +223,7 @@ void main() {
         tools: const [],
         contextSize: 500,
         maxOutputTokens: 20,
-        systemApplied: false,
+
         previousSlice: slice3,
       );
 
@@ -274,7 +249,6 @@ void main() {
         tools: const [],
         contextSize: 500,
         maxOutputTokens: 20,
-        systemApplied: false,
       );
 
       expect(slice1.messages, hasLength(4));
@@ -290,7 +264,7 @@ void main() {
         tools: const [],
         contextSize: 55,
         maxOutputTokens: 10,
-        systemApplied: false,
+
         previousSlice: slice1,
       );
 
@@ -319,7 +293,6 @@ void main() {
         tools: const [],
         contextSize: 500,
         maxOutputTokens: 20,
-        systemApplied: false,
       );
 
       // Force a drop by shrinking context.
@@ -329,7 +302,7 @@ void main() {
         tools: const [],
         contextSize: 45,
         maxOutputTokens: 10,
-        systemApplied: false,
+
         previousSlice: slice1,
       );
 
@@ -345,7 +318,7 @@ void main() {
         tools: const [],
         contextSize: 55,
         maxOutputTokens: 10,
-        systemApplied: false,
+
         previousSlice: slice2,
       );
 
@@ -386,7 +359,6 @@ void main() {
           tools: const [],
           contextSize: 56,
           maxOutputTokens: 10,
-          systemApplied: false,
         );
 
         expect(slice.droppedMessageCount, 2);
@@ -404,7 +376,7 @@ void main() {
         counter: FakeTokenCounter(perToolTokens: 0),
       );
 
-      // With systemApplied=false, system is pinned.
+      // System prompt is always pinned.
       // system + 2 user messages = 3.
       // Make budget only fit system + 1 user.
       // sys=13, a=11, b=11 = 35. Budget = 24.
@@ -413,7 +385,6 @@ void main() {
         tools: const [],
         contextSize: 34,
         maxOutputTokens: 10,
-        systemApplied: false,
       );
 
       // Should drop 'a', keep system + 'b'.
@@ -460,7 +431,6 @@ void main() {
         tools: const [],
         contextSize: 70,
         maxOutputTokens: 10,
-        systemApplied: false,
       );
 
       expect(slice.droppedMessageCount, 2);
@@ -495,7 +465,6 @@ final class FakeTokenCounter implements TokenCounter {
   int countPromptTokens({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
   }) {
     final messageTokens = messages.fold<int>(
       0,

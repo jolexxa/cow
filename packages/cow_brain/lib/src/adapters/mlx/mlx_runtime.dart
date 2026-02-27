@@ -1,26 +1,22 @@
 // MLX runtime — implements InferenceRuntime for the MLX inference backend.
-// Uses Apple's TokenIterator (via cow_mlx_generate_begin/next) for
-// prefill, sampling, and streaming detokenization. The Dart side only
-// handles stop-sequence detection and stream chunking.
+// Uses the batch decoder path for all generation (single or multi-sequence).
 // ignore_for_file: public_member_api_docs
 
-import 'dart:convert';
-
 import 'package:cow_brain/src/adapters/inference_adapter.dart';
+import 'package:cow_brain/src/adapters/mlx/mlx_batch_decoder.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_bindings.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_client.dart';
 import 'package:cow_brain/src/adapters/mlx/mlx_handles.dart';
-import 'package:cow_brain/src/adapters/stream_assembler.dart';
 import 'package:cow_brain/src/adapters/stream_chunk.dart';
+import 'package:cow_brain/src/adapters/token_decoder.dart';
 import 'package:cow_brain/src/isolate/brain_isolate.dart';
 import 'package:cow_brain/src/isolate/models.dart';
-import 'package:meta/meta.dart';
 
 /// MLX inference runtime.
 ///
-/// Plugs into [InferenceAdapter] via the [InferenceRuntime] interface. The
-/// prompt formatting and stream parsing layers are backend-agnostic, so they
-/// work identically for both llama.cpp and MLX.
+/// Plugs into [InferenceAdapter] via the [InferenceRuntime] interface. Uses
+/// [MlxBatchCoordinator] for all generation — a single sequence is just the
+/// degenerate case of a batch of 1.
 final class MlxRuntime implements InferenceRuntime, BrainRuntime {
   MlxRuntime({
     required int modelId,
@@ -33,27 +29,31 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
       modelId: modelId,
       bindings: bindings,
     );
-    _handles.contextHandle = _client.createContext(
-      _handles,
-      options.contextSize,
+    // Create the batch decoder + coordinator.
+    _decoder = MlxBatchDecoder(
+      client: client,
+      handles: _handles,
+      maxTokens: options.contextSize,
     );
+    _coordinator = MlxBatchCoordinator(decoder: _decoder);
+    _sequenceIds.add(0);
   }
 
   final MlxRuntimeOptions _options;
   final MlxClientApi _client;
   late final MlxHandles _handles;
+  late MlxBatchDecoder _decoder;
+  late MlxBatchCoordinator _coordinator;
+
+  /// Registered sequence IDs.
+  final Set<int> _sequenceIds = {};
 
   bool _disposed = false;
 
   @override
   int countTokens(String prompt, {required bool addBos}) {
     _ensureNotDisposed();
-    final tokens = _client.tokenize(
-      _handles,
-      prompt,
-      addSpecial: addBos,
-    );
-    return tokens.length;
+    return _client.tokenize(_handles, prompt, addSpecial: addBos).length;
   }
 
   @override
@@ -63,113 +63,104 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
     required bool addBos,
     required bool requiresReset,
     required int reusePrefixMessageCount,
+    int sequenceId = 0,
   }) async* {
     _ensureNotDisposed();
+    _ensureSequenceExists(sequenceId);
 
-    if (requiresReset) {
-      _client.resetContext(_handles, _options.contextSize);
-    }
-
-    // Tokenize the full prompt every time. The native side compares
-    // incoming tokens against its cached sequence to find the common
-    // prefix, trims diverged entries, and only prefills new tokens.
+    // Tokenize the full prompt.
     final promptTokens = _client.tokenize(
       _handles,
       prompt,
       addSpecial: addBos,
     );
 
-    // Begin generation — native handles cache dedup internally.
-    _client.generateBegin(
-      _handles,
+    // Add this sequence to the batch and prefill.
+    _coordinator.addAndPrefill(
+      sequenceId,
       promptTokens,
       _options.samplingOptions,
     );
 
     final maxOutputTokens = _options.maxOutputTokensDefault;
-    final assembler = StreamAssembler(stopSequences: stopSequences);
-
-    // Chunked UTF-8 decoder — same pattern as LlamaCppRuntime.
-    // Raw token bytes from the native side may contain partial UTF-8
-    // sequences; the decoder buffers them until complete.
-    final decodedChunks = <String>[];
-    final chunkSink = StringConversionSink.fromStringSink(
-      _ChunkedStringSink(decodedChunks),
-    );
-    final byteSink = const Utf8Decoder(
-      allowMalformed: true,
-    ).startChunkedConversion(chunkSink);
+    final decoder = TokenDecoder(stopSequences: stopSequences);
 
     try {
       for (var i = 0; i < maxOutputTokens; i += 1) {
-        final bytes = _client.generateNext(_handles);
+        final bytes = await _coordinator.awaitStep(sequenceId);
 
-        // null means generation is done (EOG or max tokens).
+        // null means EOG.
         if (bytes == null) break;
 
-        if (bytes.isEmpty) {
-          final chunk = assembler.addEmptyToken();
-          if (chunk != null) {
-            yield chunk;
-            await _asyncBoundary();
-          }
-          continue;
-        }
-
-        byteSink.add(bytes);
-        if (decodedChunks.isEmpty) {
-          final chunk = assembler.addEmptyToken(); // coverage:ignore-line
-          if (chunk != null) {
-            yield chunk; // coverage:ignore-line
-            await _asyncBoundary(); // coverage:ignore-line
-          }
-          continue;
-        }
-
-        final piece = _drainDecodedChunks(decodedChunks);
-        if (piece.isEmpty) {
-          final chunk = assembler.addEmptyToken();
-          if (chunk != null) {
-            yield chunk; // coverage:ignore-line
-            await _asyncBoundary(); // coverage:ignore-line
-          }
-          continue;
-        }
-
-        final chunk = assembler.addText(piece);
-        if (chunk != null) {
-          yield chunk;
-          await _asyncBoundary();
-        }
-        if (assembler.stopped) break;
+        final chunk = bytes.isEmpty
+            ? decoder.feedEmptyToken()
+            : decoder.feedBytes(bytes);
+        if (chunk != null) yield chunk;
+        if (decoder.stopped) break;
       }
     } finally {
-      byteSink.close();
-      if (decodedChunks.isNotEmpty) {
-        assembler.appendPending(_drainDecodedChunks(decodedChunks));
-      }
+      // Remove from batch if still active (e.g. stopped by stop sequence).
+      _coordinator.removeSequence(sequenceId);
     }
 
-    for (final chunk in assembler.flush()) {
+    for (final chunk in decoder.finish()) {
       yield chunk;
-      await _asyncBoundary();
     }
   }
 
   @override
+  void createSequence(int sequenceId) {
+    _ensureNotDisposed();
+    if (_sequenceIds.contains(sequenceId)) {
+      throw StateError('Sequence $sequenceId already exists');
+    }
+    _sequenceIds.add(sequenceId);
+  }
+
+  @override
+  void destroySequence(int sequenceId) {
+    _ensureNotDisposed();
+    _ensureSequenceExists(sequenceId);
+    _sequenceIds.remove(sequenceId);
+  }
+
+  @override
+  void forkSequence({required int source, required int target}) {
+    _ensureNotDisposed();
+    _ensureSequenceExists(source);
+    if (_sequenceIds.contains(target)) {
+      throw StateError('Target sequence $target already exists');
+    }
+    // TODO(mlx): The batch context doesn't support forking mid-flight.
+    // For now, just register the sequence — it will re-prefill on generate().
+    _sequenceIds.add(target);
+  }
+
+  /// Expose the batch decoder for direct use (e.g. tests).
+  MlxBatchDecoder get batchDecoder => _decoder;
+
+  @override
   void dispose() {
     if (_disposed) return;
-    if (_handles.contextHandle >= 0) {
-      _handles.bindings.freeContext(_handles.contextHandle);
-      _handles.contextHandle = -1;
-    }
+    _decoder.dispose();
+    _sequenceIds.clear();
     _disposed = true;
   }
 
   @override
   void reset() {
     _ensureNotDisposed();
-    _client.resetContext(_handles, _options.contextSize);
+    // Dispose old decoder, create fresh one.
+    _decoder.dispose();
+    _decoder = MlxBatchDecoder(
+      client: _client,
+      handles: _handles,
+      maxTokens: _options.contextSize,
+    );
+    _coordinator = MlxBatchCoordinator(decoder: _decoder);
+    _sequenceIds
+      ..clear()
+      ..add(0);
   }
 
   void _ensureNotDisposed() {
@@ -178,57 +169,9 @@ final class MlxRuntime implements InferenceRuntime, BrainRuntime {
     }
   }
 
-  Future<void> _asyncBoundary() => Future<void>.delayed(Duration.zero);
-}
-
-@visibleForTesting
-String drainMlxDecodedChunks(List<String> decodedChunks) =>
-    _drainDecodedChunks(decodedChunks);
-
-@visibleForTesting
-StringSink mlxChunkedStringSink(List<String> chunks) =>
-    _ChunkedStringSink(chunks);
-
-String _drainDecodedChunks(List<String> decodedChunks) {
-  final piece = decodedChunks.length == 1
-      ? decodedChunks.removeAt(0)
-      : decodedChunks.join();
-  if (decodedChunks.isNotEmpty) {
-    decodedChunks.clear();
-  }
-  return piece;
-}
-
-final class _ChunkedStringSink implements StringSink {
-  _ChunkedStringSink(this._chunks);
-
-  final List<String> _chunks;
-
-  @override
-  void write(Object? obj) {
-    if (obj == null) return;
-    _chunks.add(obj.toString());
-  }
-
-  @override
-  void writeAll(Iterable<Object?> objects, [String separator = '']) {
-    var first = true;
-    for (final obj in objects) {
-      if (!first && separator.isNotEmpty) _chunks.add(separator);
-      first = false;
-      if (obj == null) continue;
-      _chunks.add(obj.toString());
+  void _ensureSequenceExists(int sequenceId) {
+    if (!_sequenceIds.contains(sequenceId)) {
+      throw StateError('Sequence $sequenceId does not exist');
     }
-  }
-
-  @override
-  void writeCharCode(int charCode) {
-    _chunks.add(String.fromCharCode(charCode));
-  }
-
-  @override
-  void writeln([Object? obj = '']) {
-    if (obj != null && obj.toString().isNotEmpty) _chunks.add(obj.toString());
-    _chunks.add('\n');
   }
 }

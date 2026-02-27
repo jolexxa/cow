@@ -12,7 +12,6 @@ abstract interface class ContextManager {
     required List<ToolDefinition> tools,
     required int contextSize,
     required int maxOutputTokens,
-    required bool systemApplied,
     ContextSlice? previousSlice,
   });
 }
@@ -33,7 +32,6 @@ final class SlidingWindowContextManager implements ContextManager {
     required List<ToolDefinition> tools,
     required int contextSize,
     required int maxOutputTokens,
-    required bool systemApplied,
     ContextSlice? previousSlice,
   }) {
     final budget = contextSize - maxOutputTokens - safetyMarginTokens;
@@ -45,15 +43,12 @@ final class SlidingWindowContextManager implements ContextManager {
       );
     }
 
-    final pinnedPrefixCount = messages.pinnedPrefixCount(
-      systemApplied: systemApplied,
-    );
+    final pinnedPrefixCount = messages.pinnedPrefixCount;
     final working = List<Message>.of(messages);
 
     var estimated = _counter.countPromptTokens(
       messages: working,
       tools: tools,
-      systemApplied: systemApplied,
     );
     var dropped = 0;
 
@@ -63,7 +58,6 @@ final class SlidingWindowContextManager implements ContextManager {
       estimated = _counter.countPromptTokens(
         messages: working,
         tools: tools,
-        systemApplied: systemApplied,
       );
     }
 

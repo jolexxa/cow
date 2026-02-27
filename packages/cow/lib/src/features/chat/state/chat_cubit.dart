@@ -213,12 +213,14 @@ class ChatCubit extends LogicBloc<ChatState> {
         tools: toolRegistry.definitions,
         settings: agentSettings,
         enableReasoning: request.enableReasoning,
+        systemPrompt: request.systemPrompt,
       );
 
       await _summaryBrain.init(
         modelHandle: summaryModel.modelPointer,
         options: summaryOptions,
         profile: summaryModelProfile.modelFamily,
+        systemPrompt: request.summarySystemPrompt,
       );
 
       input(const BrainsInitialized(settings: agentSettings));

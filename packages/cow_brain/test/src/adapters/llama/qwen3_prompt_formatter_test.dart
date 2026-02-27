@@ -35,7 +35,6 @@ void main() {
           ),
         ],
         tools: const [tool],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -47,28 +46,12 @@ void main() {
       expect(prompt.trimRight(), endsWith('<|im_start|>assistant'));
     });
 
-    test('skips system messages when systemApplied is true', () {
-      final prompt = formatter.format(
-        messages: const [
-          Message(role: Role.system, content: 'System prompt.'),
-          Message(role: Role.user, content: 'Hello.'),
-        ],
-        tools: const [],
-        systemApplied: true,
-        enableReasoning: true,
-      );
-
-      expect(prompt, isNot(contains('System prompt.')));
-      expect(prompt, contains('Hello.'));
-    });
-
     test('injects empty think block when reasoning is disabled', () {
       final prompt = formatter.format(
         messages: const [
           Message(role: Role.user, content: 'Hello.'),
         ],
         tools: const [],
-        systemApplied: false,
         enableReasoning: false,
       );
 
@@ -89,7 +72,6 @@ void main() {
           ),
         ],
         tools: const [],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -104,7 +86,6 @@ void main() {
           Message(role: Role.tool, content: 'Result'),
         ],
         tools: const [],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -134,7 +115,6 @@ void main() {
           Message(role: Role.assistant, content: 'Done.'),
         ],
         tools: const [tool],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -195,7 +175,6 @@ void main() {
           ),
         ],
         tools: const [],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -209,7 +188,6 @@ void main() {
           Message(role: Role.user, content: 'Latest question.'),
         ],
         tools: const [],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -240,7 +218,6 @@ void main() {
           ),
         ],
         tools: const [tool],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -263,7 +240,6 @@ void main() {
           Message(role: Role.assistant, content: 'Follow up.'),
         ],
         tools: const [],
-        systemApplied: false,
         enableReasoning: true,
       );
 
@@ -277,7 +253,6 @@ void main() {
           Message(role: Role.system, content: 'System only.'),
         ],
         tools: const [],
-        systemApplied: false,
         enableReasoning: true,
       );
 

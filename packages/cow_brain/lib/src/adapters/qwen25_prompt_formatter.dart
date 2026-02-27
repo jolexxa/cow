@@ -19,82 +19,76 @@ final class Qwen25PromptFormatter implements PromptFormatter {
   String format({
     required List<Message> messages,
     required List<ToolDefinition> tools,
-    required bool systemApplied,
     required bool enableReasoning,
   }) {
     final buffer = StringBuffer();
     final toolList = tools;
 
-    if (!systemApplied) {
-      if (toolList.isNotEmpty) {
-        buffer.writeln('<|im_start|>system');
-        final systemPrompt = _systemPrompt(messages);
-        if (systemPrompt != null) {
-          buffer.writeln(systemPrompt.trimRight());
-        } else {
-          buffer.writeln(
+    if (toolList.isNotEmpty) {
+      buffer.writeln('<|im_start|>system');
+      final systemPrompt = _systemPrompt(messages);
+      if (systemPrompt != null) {
+        buffer.writeln(systemPrompt.trimRight());
+      } else {
+        buffer.writeln(
+          'You are Qwen, created by Alibaba Cloud. '
+          'You are a helpful assistant.',
+        );
+      }
+
+      buffer
+        ..writeln()
+        ..writeln('# Tools')
+        ..writeln()
+        ..writeln(
+          'You may call one or more functions to assist with the user query.',
+        )
+        ..writeln()
+        ..writeln(
+          'You are provided with function signatures within <tools></tools> '
+          'XML tags:',
+        )
+        ..writeln('<tools>');
+
+      for (final tool in toolList) {
+        buffer
+          ..writeln()
+          ..write(jsonEncode(_toolDeclaration(tool)));
+      }
+
+      buffer
+        ..writeln()
+        ..writeln('</tools>')
+        ..writeln()
+        ..writeln(
+          'For each function call, return a json object with function name '
+          'and arguments within <tool_call></tool_call> XML tags:',
+        )
+        ..writeln('<tool_call>')
+        ..writeln(
+          '{"name": <function-name>, "arguments": <args-json-object>}',
+        )
+        ..writeln('</tool_call><|im_end|>');
+    } else {
+      final systemPrompt = _systemPrompt(messages);
+      if (systemPrompt != null) {
+        buffer
+          ..writeln('<|im_start|>system')
+          ..writeln(systemPrompt.trimRight())
+          ..writeln('<|im_end|>');
+      } else {
+        buffer
+          ..writeln('<|im_start|>system')
+          ..writeln(
             'You are Qwen, created by Alibaba Cloud. '
             'You are a helpful assistant.',
-          );
-        }
-
-        buffer
-          ..writeln()
-          ..writeln('# Tools')
-          ..writeln()
-          ..writeln(
-            'You may call one or more functions to assist with the user query.',
           )
-          ..writeln()
-          ..writeln(
-            'You are provided with function signatures within <tools></tools> '
-            'XML tags:',
-          )
-          ..writeln('<tools>');
-
-        for (final tool in toolList) {
-          buffer
-            ..writeln()
-            ..write(jsonEncode(_toolDeclaration(tool)));
-        }
-
-        buffer
-          ..writeln()
-          ..writeln('</tools>')
-          ..writeln()
-          ..writeln(
-            'For each function call, return a json object with function name '
-            'and arguments within <tool_call></tool_call> XML tags:',
-          )
-          ..writeln('<tool_call>')
-          ..writeln(
-            '{"name": <function-name>, "arguments": <args-json-object>}',
-          )
-          ..writeln('</tool_call><|im_end|>');
-      } else {
-        final systemPrompt = _systemPrompt(messages);
-        if (systemPrompt != null) {
-          buffer
-            ..writeln('<|im_start|>system')
-            ..writeln(systemPrompt.trimRight())
-            ..writeln('<|im_end|>');
-        } else {
-          buffer
-            ..writeln('<|im_start|>system')
-            ..writeln(
-              'You are Qwen, created by Alibaba Cloud. '
-              'You are a helpful assistant.',
-            )
-            ..writeln('<|im_end|>');
-        }
+          ..writeln('<|im_end|>');
       }
     }
 
     for (var i = 0; i < messages.length; i++) {
       final message = messages[i];
-      if (systemApplied && message.role == Role.system) {
-        continue;
-      }
 
       if (message.role == Role.user ||
           (message.role == Role.system && i != 0) ||

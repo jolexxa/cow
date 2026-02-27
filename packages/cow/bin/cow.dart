@@ -1,9 +1,8 @@
-import 'dart:ffi';
 import 'dart:io';
 
 import 'package:cow/src/app/app.dart';
+import 'package:cow/src/native_stderr.dart';
 import 'package:cow/src/platforms/os_platform.dart';
-import 'package:ffi/ffi.dart';
 
 Future<void> main(List<String> args) async {
   final platform = OSPlatform.current();
@@ -17,7 +16,7 @@ Future<void> main(List<String> args) async {
   // it crashes. So the only option is to redirect native stderr via
   // mac/linux system calls.
   final debug = args.contains('--debug');
-  _redirectNativeStderr(platform, debug: debug);
+  redirectNativeStderr(platform, debug: debug);
 
   final appArgs = args.where((a) => a != '--debug').toList();
   final exitCode = await runCowApp(appArgs, platform);
@@ -35,59 +34,4 @@ Future<void> _flushThenExit(int status) {
     stdout.close(),
     stderr.close(),
   ]).then<void>((_) => exit(status));
-}
-
-void _redirectNativeStderr(OSPlatform platform, {required bool debug}) {
-  final libc = _openLibC();
-  if (libc == null) {
-    return;
-  }
-
-  final open = libc
-      .lookupFunction<
-        Int32 Function(Pointer<Utf8>, Int32, Int32),
-        int Function(Pointer<Utf8>, int, int)
-      >('open');
-  final dup2 = libc
-      .lookupFunction<Int32 Function(Int32, Int32), int Function(int, int)>(
-        'dup2',
-      );
-  final close = libc.lookupFunction<Int32 Function(Int32), int Function(int)>(
-    'close',
-  );
-
-  final String target;
-  final int flags;
-
-  target = debug ? 'cow_native.log' : '/dev/null';
-
-  flags =
-      platform.openFlagWriteOnly |
-      platform.openFlagCreate |
-      platform.openFlagTrunc;
-
-  const mode = 0x1A4; // 0644
-  final targetPtr = target.toNativeUtf8();
-  final fd = open(targetPtr, flags, mode);
-
-  calloc.free(targetPtr);
-
-  if (fd < 0) {
-    return;
-  }
-
-  dup2(fd, 2);
-  close(fd);
-}
-
-DynamicLibrary? _openLibC() {
-  try {
-    if (Platform.isMacOS) {
-      return DynamicLibrary.open('/usr/lib/libSystem.B.dylib');
-    }
-    if (Platform.isLinux) {
-      return DynamicLibrary.open('libc.so.6');
-    }
-  } on Object catch (_) {}
-  return null;
 }

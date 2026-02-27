@@ -67,6 +67,7 @@ void main() {
           return state.toSelf();
         };
 
+        logic.start();
         logic.input(const CustomInput());
 
         expect(logic.value, isA<StateB>());
@@ -113,22 +114,130 @@ void main() {
       );
     });
 
+    group('status', () {
+      test('starts in stopped status', () {
+        expect(logic.status, LogicBlockStatus.stopped);
+        expect(logic.isStopped, isTrue);
+        expect(logic.isStarted, isFalse);
+        expect(logic.isDisposed, isFalse);
+      });
+
+      test('start() sets status to started', () {
+        logic.start();
+        expect(logic.status, LogicBlockStatus.started);
+        expect(logic.isStarted, isTrue);
+      });
+
+      test('stop() sets status to stopped', () {
+        logic.start();
+        logic.stop();
+        expect(logic.status, LogicBlockStatus.stopped);
+        expect(logic.isStopped, isTrue);
+      });
+
+      test('dispose() sets status to disposed', () {
+        logic.start();
+        logic.dispose();
+        expect(logic.status, LogicBlockStatus.disposed);
+        expect(logic.isDisposed, isTrue);
+      });
+
+      test('value throws when not started', () {
+        expect(() => logic.value, throwsA(isA<StateError>()));
+      });
+
+      test('input() throws when not started', () {
+        expect(
+          () => logic.input(const CustomInput()),
+          throwsA(isA<StateError>()),
+        );
+      });
+
+      test('start() throws when disposed', () {
+        logic.dispose();
+        expect(() => logic.start(), throwsA(isA<StateError>()));
+      });
+
+      test('stop() throws when disposed', () {
+        logic.dispose();
+        expect(() => logic.stop(), throwsA(isA<StateError>()));
+      });
+
+      test('input() throws when disposed', () {
+        logic.dispose();
+        expect(
+          () => logic.input(const CustomInput()),
+          throwsA(isA<StateError>()),
+        );
+      });
+
+      test('forceReset() throws when disposed', () {
+        final stateA = logic.get<StateA>();
+        logic.dispose();
+        expect(
+          () => logic.forceReset(stateA),
+          throwsA(isA<StateError>()),
+        );
+      });
+
+      test('forceReset() throws when not started', () {
+        expect(
+          () => logic.forceReset(logic.get<StateA>()),
+          throwsA(isA<StateError>()),
+        );
+      });
+    });
+
+    group('dispose', () {
+      test('stops a running logic block', () {
+        var onStopCalled = false;
+        logic.onStopCallback = () => onStopCalled = true;
+
+        logic.start();
+        logic.dispose();
+
+        expect(onStopCalled, isTrue);
+        expect(logic.isDisposed, isTrue);
+      });
+
+      test('clears blackboard, listeners, and inputs', () {
+        logic.start();
+
+        final binding = logic.bind();
+        binding.onState<TestLogicBlockState>((_) {});
+
+        logic.dispose();
+
+        // Blackboard should be cleared
+        expect(() => logic.get<StateA>(), throwsArgumentError);
+      });
+
+      test('duplicate dispose does nothing', () {
+        logic.start();
+        logic.dispose();
+        logic.dispose(); // should not throw
+        expect(logic.isDisposed, isTrue);
+      });
+
+      test('works on a stopped logic block', () {
+        logic.dispose();
+        expect(logic.isDisposed, isTrue);
+      });
+    });
+
+    group('task', () {
+      test('is completed when no async work is pending', () {
+        logic.start();
+        expect(logic.task, completion(isNull));
+      });
+    });
+
     group('onStart and onStop', () {
       test('onStart is called when start() is invoked', () {
         var onStartCalled = false;
         logic.onStartCallback = () => onStartCalled = true;
 
         logic.start();
-
-        expect(onStartCalled, isTrue);
-      });
-
-      test('onStart is called on first lazy access via value', () {
-        var onStartCalled = false;
-        logic.onStartCallback = () => onStartCalled = true;
-
-        // Access value lazily (triggers _flush)
-        final _ = logic.value;
 
         expect(onStartCalled, isTrue);
       });
@@ -172,6 +281,14 @@ void main() {
         expect(onStartCount, 2);
         expect(onStopCount, 2);
       });
+
+      test('inputs queued during onStart are processed', () {
+        logic.onStartCallback = () => logic.input(const GoToB());
+
+        logic.start();
+
+        expect(logic.value, isA<StateB>());
+      });
     });
 
     group('forceReset', () {
@@ -185,6 +302,7 @@ void main() {
           return state.toSelf();
         };
 
+        logic.start();
         logic.input(const CustomInput());
       });
 
@@ -331,6 +449,7 @@ void main() {
           return transition;
         };
 
+        logic.start();
         logic.input(const CustomInput());
 
         expect(errors, hasLength(1));
@@ -380,6 +499,27 @@ void main() {
 
         expect(logic.value, isA<StateB>());
       });
+    });
+
+    group('exception propagation', () {
+      test(
+        'exceptions thrown from input handlers propagate '
+        'and _busy is decremented',
+        () {
+          stateA.onInputCallback = (state, input) {
+            throw StateError('boom');
+          };
+
+          logic.start();
+          expect(
+            () => logic.input(const CustomInput()),
+            throwsA(isA<StateError>()),
+          );
+
+          // _busy should be back to 0, so the logic block is usable again
+          expect(logic.isProcessing, isFalse);
+        },
+      );
     });
 
     group('edge cases', () {

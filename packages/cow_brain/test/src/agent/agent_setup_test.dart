@@ -317,6 +317,7 @@ final class ScriptedInferenceRuntime implements InferenceRuntime {
     required bool addBos,
     required bool requiresReset,
     required int reusePrefixMessageCount,
+    int sequenceId = 0,
   }) async* {
     prompts.add(prompt);
     lastPrompt = prompt;
@@ -327,6 +328,15 @@ final class ScriptedInferenceRuntime implements InferenceRuntime {
     _index += 1;
     yield StreamChunk(text: output, tokenCountDelta: 0);
   }
+
+  @override
+  void createSequence(int sequenceId) {}
+
+  @override
+  void destroySequence(int sequenceId) {}
+
+  @override
+  void forkSequence({required int source, required int target}) {}
 }
 
 final class FakeLlamaClient implements LlamaClientApi {
@@ -361,8 +371,9 @@ final class FakeLlamaClient implements LlamaClientApi {
   @override
   Pointer<llama_context> createContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  ) {
+    LlamaContextOptions options, {
+    int maxSequences = 1,
+  }) {
     return Pointer.fromAddress(2);
   }
 
@@ -370,8 +381,25 @@ final class FakeLlamaClient implements LlamaClientApi {
   void decode(
     LlamaHandles handles,
     Pointer<llama_context> context,
-    List<int> tokens,
+    List<int> tokens, {
+    int sequenceId = 0,
+  }) {}
+
+  @override
+  void decodeBatch(
+    LlamaHandles handles,
+    Pointer<llama_context> context,
+    List<({int token, int pos, int seqId, bool logits})> entries,
   ) {}
+
+  @override
+  int sampleAt(
+    LlamaHandles handles,
+    LlamaSamplerChain sampler,
+    int batchIndex,
+  ) {
+    return 0;
+  }
 
   @override
   void dispose(LlamaHandles handles) {}
@@ -396,8 +424,9 @@ final class FakeLlamaClient implements LlamaClientApi {
   @override
   void resetContext(
     LlamaHandles handles,
-    LlamaContextOptions options,
-  ) {}
+    LlamaContextOptions options, {
+    required int maxSequences,
+  }) {}
 }
 
 final class _NoopBindings implements LlamaBindings {
@@ -624,4 +653,23 @@ final class _NoopBindings implements LlamaBindings {
   ) {
     throw UnimplementedError();
   }
+
+  @override
+  void llama_memory_seq_cp(
+    llama_memory_t mem,
+    int seqIdSrc,
+    int seqIdDst,
+    int p0,
+    int p1,
+  ) {
+    throw UnimplementedError();
+  }
+
+  @override
+  llama_batch llama_batch_init(int nTokens, int embd, int nSeqMax) {
+    throw UnimplementedError();
+  }
+
+  @override
+  void llama_batch_free(llama_batch batch) {}
 }
