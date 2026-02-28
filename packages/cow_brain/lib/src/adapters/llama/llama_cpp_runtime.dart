@@ -260,9 +260,10 @@ final class LlamaCppRuntime implements InferenceRuntime, BrainRuntime {
     }
     // TODO(llama.cpp): seq_cp requires "full" (non-split) KV buffers, which
     // aren't available when maxSequences > 1. For now, create a fresh sequence
-    // and copy the token list — the next generate() call will re-prefill via
+    // with an empty cache — the next generate() call will re-prefill via
     // prefix matching. Replace with seq_cp when upstream supports it.
-    _sequences[target] = SequenceState.from(_sequences[source]!);
+    _sequences[target] = SequenceState.from(_sequences[source]!)
+      ..cachedTokens = [];
   }
 
   @override
